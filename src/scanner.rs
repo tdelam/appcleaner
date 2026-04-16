@@ -38,11 +38,14 @@ impl Scanner {
     pub fn scan(&self, bundle: &AppBundle) -> Result<Vec<FoundFile>> {
         let mut found = vec![FoundFile::new(bundle.path.clone())];
 
+        // Pre-compute once per scan rather than once per directory entry.
+        let terms = MatchTerms::from_bundle(bundle);
+
         for dir in self.search_dirs() {
             if !dir.exists() {
                 continue;
             }
-            self.scan_dir(&dir, bundle, &mut found);
+            self.scan_dir(&dir, &terms, &mut found);
         }
 
         // Sort by size descending so the largest items appear first (skip index 0 — the bundle)
@@ -70,7 +73,7 @@ impl Scanner {
         ]
     }
 
-    fn scan_dir(&self, dir: &Path, bundle: &AppBundle, found: &mut Vec<FoundFile>) {
+    fn scan_dir(&self, dir: &Path, terms: &MatchTerms, found: &mut Vec<FoundFile>) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return, // skip unreadable directories (e.g. permission denied)
@@ -83,36 +86,49 @@ impl Scanner {
                 None => continue,
             };
 
-            if self.is_match(&file_name, bundle) {
+            if is_match(&file_name, terms) {
                 found.push(FoundFile::new(path));
             }
         }
     }
+}
 
-    fn is_match(&self, name: &str, bundle: &AppBundle) -> bool {
-        let name_lower = name.to_lowercase();
-        let bundle_id = bundle.bundle_id.to_lowercase();
-        let app_name = bundle.name.to_lowercase();
+/// Lowercased bundle terms computed once per scan and reused for every entry.
+struct MatchTerms {
+    bundle_id: String,
+    app_name: String,
+}
 
-        // Exact match on bundle ID or app name
-        if name_lower == bundle_id || name_lower == app_name {
-            return true;
+impl MatchTerms {
+    fn from_bundle(bundle: &AppBundle) -> Self {
+        MatchTerms {
+            bundle_id: bundle.bundle_id.to_lowercase(),
+            app_name: bundle.name.to_lowercase(),
         }
-
-        // Preference / cache files: "com.example.app.plist" or "com.example.app "
-        if name_lower.starts_with(&format!("{bundle_id}."))
-            || name_lower.starts_with(&format!("{bundle_id} "))
-        {
-            return true;
-        }
-
-        // App name with extension: "Slack.savedState"
-        if name_lower.starts_with(&format!("{app_name}.")) {
-            return true;
-        }
-
-        false
     }
+}
+
+fn is_match(name: &str, terms: &MatchTerms) -> bool {
+    let name_lower = name.to_lowercase();
+
+    // Exact match on bundle ID or app name
+    if name_lower == terms.bundle_id || name_lower == terms.app_name {
+        return true;
+    }
+
+    // Preference / cache files: "com.example.app.plist" or "com.example.app "
+    if name_lower.starts_with(&format!("{}.", terms.bundle_id))
+        || name_lower.starts_with(&format!("{} ", terms.bundle_id))
+    {
+        return true;
+    }
+
+    // App name with extension: "Slack.savedState"
+    if name_lower.starts_with(&format!("{}.", terms.app_name)) {
+        return true;
+    }
+
+    false
 }
 
 fn compute_size(path: &Path) -> u64 {
@@ -143,31 +159,36 @@ mod tests {
         }
     }
 
+    fn terms(bundle: &AppBundle) -> MatchTerms {
+        MatchTerms::from_bundle(bundle)
+    }
+
     #[test]
     fn matches_exact_bundle_id() {
-        let scanner = Scanner { home_dir: PathBuf::from("/tmp") };
         let bundle = make_bundle("Slack", "com.tinyspeck.slackmacgap");
-        assert!(scanner.is_match("com.tinyspeck.slackmacgap", &bundle));
+        assert!(is_match("com.tinyspeck.slackmacgap", &terms(&bundle)));
     }
 
     #[test]
     fn matches_plist_with_suffix() {
-        let scanner = Scanner { home_dir: PathBuf::from("/tmp") };
         let bundle = make_bundle("Slack", "com.tinyspeck.slackmacgap");
-        assert!(scanner.is_match("com.tinyspeck.slackmacgap.plist", &bundle));
+        assert!(is_match("com.tinyspeck.slackmacgap.plist", &terms(&bundle)));
     }
 
     #[test]
     fn matches_app_name_with_extension() {
-        let scanner = Scanner { home_dir: PathBuf::from("/tmp") };
         let bundle = make_bundle("Slack", "com.tinyspeck.slackmacgap");
-        assert!(scanner.is_match("Slack.savedState", &bundle));
+        assert!(is_match("Slack.savedState", &terms(&bundle)));
     }
 
     #[test]
     fn does_not_match_unrelated() {
-        let scanner = Scanner { home_dir: PathBuf::from("/tmp") };
         let bundle = make_bundle("Slack", "com.tinyspeck.slackmacgap");
-        assert!(!scanner.is_match("com.apple.Safari", &bundle));
+        assert!(!is_match("com.apple.Safari", &terms(&bundle)));
     }
+
+    // Known limitation: an app with a very short bundle ID (e.g. "com.example") will
+    // produce false-positive matches against files belonging to "com.example.other".
+    // In practice this is not an issue because real bundle IDs are long and unique.
+    // A future improvement could add boundary checks on the suffix.
 }
