@@ -61,6 +61,12 @@ pub struct TrashStore {
     root: PathBuf,
 }
 
+impl Default for TrashStore {
+    fn default() -> Self {
+        Self::new().expect("could not determine home directory")
+    }
+}
+
 impl TrashStore {
     /// Create a store rooted at `~/.appclean/trash/`.
     ///
@@ -133,7 +139,7 @@ impl TrashStore {
             .with_context(|| format!("failed to write manifest to {}", manifest_path.display()))?;
 
         println!("Moved {} item(s) to trash.", entry.items.len());
-        println!("  Restore with: appclean restore");
+        println!("  Restore with: apc restore");
 
         Ok(entry)
     }

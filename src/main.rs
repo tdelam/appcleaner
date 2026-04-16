@@ -68,7 +68,7 @@ fn main() -> Result<()> {
     }
 
     let app_path = cli.app.ok_or_else(|| {
-        anyhow::anyhow!("a .app path is required\n\nUsage: appclean <APP>\n       appclean restore")
+        anyhow::anyhow!("a .app path is required\n\nUsage: apc <APP>\n       apc restore")
     })?;
     cmd_clean(&app_path, cli.dry_run, cli.yes, cli.permanent)
 }

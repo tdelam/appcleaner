@@ -26,6 +26,12 @@ pub struct Scanner {
     home_dir: PathBuf,
 }
 
+impl Default for Scanner {
+    fn default() -> Self {
+        Self::new().expect("could not determine home directory")
+    }
+}
+
 impl Scanner {
     /// Create a scanner rooted at the current user's home directory.
     ///
@@ -84,18 +90,24 @@ impl Scanner {
     }
 }
 
-/// Lowercased bundle terms computed once per scan and reused for every entry.
+/// Lowercased bundle terms — and their common prefixes — computed once per
+/// scan and reused for every directory entry to avoid per-entry allocations.
 struct MatchTerms {
     bundle_id: String,
     app_name: String,
+    bundle_id_dot: String,   // e.g. "com.tinyspeck.slackmacgap."
+    bundle_id_space: String, // e.g. "com.tinyspeck.slackmacgap "
+    app_name_dot: String,    // e.g. "slack."
 }
 
 impl MatchTerms {
     fn from_bundle(bundle: &AppBundle) -> Self {
-        Self {
-            bundle_id: bundle.bundle_id.to_lowercase(),
-            app_name: bundle.name.to_lowercase(),
-        }
+        let bundle_id = bundle.bundle_id.to_lowercase();
+        let app_name = bundle.name.to_lowercase();
+        let bundle_id_dot = format!("{bundle_id}.");
+        let bundle_id_space = format!("{bundle_id} ");
+        let app_name_dot = format!("{app_name}.");
+        Self { bundle_id, app_name, bundle_id_dot, bundle_id_space, app_name_dot }
     }
 }
 
@@ -125,18 +137,14 @@ fn is_match(name: &str, terms: &MatchTerms) -> bool {
     }
 
     // Preference / cache files: "com.example.app.plist" or "com.example.app "
-    if name_lower.starts_with(&format!("{}.", terms.bundle_id))
-        || name_lower.starts_with(&format!("{} ", terms.bundle_id))
+    if name_lower.starts_with(&terms.bundle_id_dot)
+        || name_lower.starts_with(&terms.bundle_id_space)
     {
         return true;
     }
 
     // App name with extension: "Slack.savedState"
-    if name_lower.starts_with(&format!("{}.", terms.app_name)) {
-        return true;
-    }
-
-    false
+    name_lower.starts_with(&terms.app_name_dot)
 }
 
 fn compute_size(path: &Path) -> u64 {

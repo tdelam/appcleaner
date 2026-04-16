@@ -323,7 +323,7 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
             f.render_widget(
                 Paragraph::new(
                     Span::styled(
-                        "Restore any time with: appclean restore",
+                        "Restore any time with: apc restore",
                         Style::default().fg(Color::DarkGray),
                     ),
                 )
