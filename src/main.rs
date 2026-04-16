@@ -10,7 +10,7 @@ use appclean::{cleaner, trash, ui, AppBundle, Scanner, TrashStore};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "ac",
+    name = "apc",
     version,
     about = "Remove a macOS app and all its associated files"
 )]

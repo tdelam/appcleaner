@@ -2,7 +2,7 @@
 
 A macOS command-line app cleaner. When you drag an app to the Trash, macOS leaves behind preference files, caches, support data, and more scattered across `~/Library`. `appclean` finds and removes all of it — interactively, with a recoverable trash.
 
-The binary is named **`ac`** for quick access (same idea as `rg` for ripgrep).
+The binary is named **`apc`** for quick access (same idea as `rg` for ripgrep).
 
 ## Features
 
@@ -24,7 +24,7 @@ cd appclean
 cargo install --path .
 ```
 
-This installs the `ac` binary into `~/.cargo/bin/`.
+This installs the `apc` binary into `~/.cargo/bin/`.
 
 ## Usage
 
