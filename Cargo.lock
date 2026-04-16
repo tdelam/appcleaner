@@ -66,6 +66,7 @@ dependencies = [
  "bytesize",
  "clap",
  "colored",
+ "console",
  "dialoguer",
  "dirs",
  "indicatif",
