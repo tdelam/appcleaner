@@ -33,7 +33,7 @@ This installs the `apc` binary into `~/.cargo/bin/`.
 Files are moved to `~/.appclean/trash/` — restore them at any time.
 
 ```sh
-ac /Applications/Slack.app
+apc /Applications/Slack.app
 ```
 
 The interactive file selector opens in the terminal:
@@ -55,7 +55,7 @@ The interactive file selector opens in the terminal:
 ### Restore a previous removal
 
 ```sh
-ac restore
+apc restore
 ```
 
 Lists all past sessions and lets you pick one to restore.
@@ -63,26 +63,26 @@ Lists all past sessions and lets you pick one to restore.
 ### Remove permanently (no trash)
 
 ```sh
-ac --permanent /Applications/Slack.app
+apc --permanent /Applications/Slack.app
 ```
 
 ### Preview without deleting
 
 ```sh
-ac --dry-run /Applications/Slack.app
+apc --dry-run /Applications/Slack.app
 ```
 
 ### Skip the confirmation prompt
 
 ```sh
-ac --yes /Applications/Slack.app
+apc --yes /Applications/Slack.app
 ```
 
 ### Empty the trash
 
 ```sh
-ac empty-trash                  # remove all sessions
-ac empty-trash --older-than 30  # remove sessions older than 30 days
+apc empty-trash                  # remove all sessions
+apc empty-trash --older-than 30  # remove sessions older than 30 days
 ```
 
 ## Trash retention
@@ -90,7 +90,7 @@ ac empty-trash --older-than 30  # remove sessions older than 30 days
 Sessions are **automatically purged after 30 days** on every run. A one-line notice appears if anything was cleaned up. To empty manually:
 
 ```sh
-ac empty-trash
+apc empty-trash
 ```
 
 ## Trash location
