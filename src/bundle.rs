@@ -63,13 +63,30 @@ impl AppBundle {
     }
 }
 
+impl std::fmt::Display for AppBundle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.name, self.bundle_id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn rejects_non_app_path() {
-        let err = AppBundle::from_path("/Applications/notanapp.dmg").unwrap_err();
+        // Use a path that is guaranteed not to be a .app bundle
+        let err = AppBundle::from_path("/tmp/not-an-app.dmg").unwrap_err();
         assert!(err.to_string().contains("not a .app bundle"));
+    }
+
+    #[test]
+    fn display_includes_name_and_bundle_id() {
+        let bundle = AppBundle {
+            path: "/Applications/Slack.app".into(),
+            name: "Slack".to_string(),
+            bundle_id: "com.tinyspeck.slackmacgap".to_string(),
+        };
+        assert_eq!(bundle.to_string(), "Slack (com.tinyspeck.slackmacgap)");
     }
 }
