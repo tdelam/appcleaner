@@ -53,18 +53,27 @@ where
 
 /// Show an interactive file list. Returns the files the user chose to remove.
 /// Returns an empty vec if the user quits without confirming.
+///
+/// # Errors
+/// Returns an error if terminal initialisation or event polling fails.
 pub fn select_files(app_name: &str, files: &[FoundFile]) -> Result<Vec<FoundFile>> {
     with_tui(|t| run_file_selector(t, app_name, files))
 }
 
 /// Show a yes/no confirmation dialog. Defaults to No for safety.
+///
+/// # Errors
+/// Returns an error if terminal initialisation or event polling fails.
 pub fn confirm_deletion(files: &[FoundFile]) -> Result<bool> {
     let total: u64 = files.iter().map(|f| f.size).sum();
     with_tui(|t| run_confirm(t, files.len(), total))
 }
 
-/// Show a scrollable list and return the index the user selected, or None if
+/// Show a scrollable list and return the index the user selected, or `None` if
 /// they quit. Used for restore session selection.
+///
+/// # Errors
+/// Returns an error if terminal initialisation or event polling fails.
 pub fn select_from_list(prompt: &str, items: &[String]) -> Result<Option<usize>> {
     with_tui(|t| run_list_selector(t, prompt, items))
 }
@@ -81,6 +90,7 @@ pub fn show_dry_run(files: &[FoundFile]) {
 
 // ── File selector ─────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) -> Result<Vec<FoundFile>> {
     let mut selected = vec![true; files.len()];
     let mut cursor = 0usize;
@@ -114,10 +124,10 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) ->
 
                     let path = shorten_path(&file.path);
                     let path_display = format!("{:<path_width$}", truncate_left(&path, path_width));
-                    let path_color = if !is_sel {
-                        Color::DarkGray
-                    } else {
+                    let path_color = if is_sel {
                         file_type_color(&file.path)
+                    } else {
+                        Color::DarkGray
                     };
                     let path_span = Span::styled(
                         path_display,
@@ -220,7 +230,7 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) ->
                     }
                     KeyCode::Char('a') => {
                         let all = selected.iter().all(|&s| s);
-                        selected.iter_mut().for_each(|s| *s = !all);
+                        selected.fill(!all);
                     }
                     KeyCode::Enter => break,
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(Vec::new()),
@@ -240,6 +250,7 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) ->
 
 // ── Confirm dialog ────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<bool> {
     // Default to No — forces the user to actively choose Yes
     let mut confirm = false;
@@ -295,7 +306,7 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
             f.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(
-                        format!("{} item(s)", count),
+                        format!("{count} item(s)"),
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" will be moved to the appclean trash  ("),
@@ -328,13 +339,13 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let no_style = if !confirm {
+            let no_style = if confirm {
+                Style::default().fg(Color::DarkGray)
+            } else {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Green)
                     .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::DarkGray)
             };
 
             f.render_widget(
@@ -371,7 +382,7 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
                         confirm = !confirm;
                     }
                     KeyCode::Char('y') => return Ok(true),
-                    KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
+                    KeyCode::Char('n' | 'q') | KeyCode::Esc => return Ok(false),
                     KeyCode::Enter => return Ok(confirm),
                     _ => {}
                 }
@@ -505,8 +516,14 @@ fn size_bar(size: u64, max: u64, width: usize) -> String {
     if width == 0 || max == 0 {
         return "░".repeat(width);
     }
-    let ratio = size as f64 / max as f64;
-    let filled = ((ratio * width as f64).round() as usize).min(width);
+    // Integer-only arithmetic — avoids float precision/truncation casts.
+    // saturating_mul guards against overflow on pathologically large sizes.
+    // try_from is infallible here: the value is bounded by .min(width as u64)
+    // which already fits in a usize.
+    let filled = usize::try_from(
+        (size.saturating_mul(width as u64) / max).min(width as u64),
+    )
+    .unwrap_or(width);
     format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
 }
 

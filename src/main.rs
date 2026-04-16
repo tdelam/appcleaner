@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -10,7 +10,7 @@ use appclean::{cleaner, trash, ui, AppBundle, Scanner, TrashStore};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "appclean",
+    name = "apc",
     version,
     about = "Remove a macOS app and all its associated files"
 )]
@@ -56,10 +56,7 @@ fn main() -> Result<()> {
     if let Ok(store) = TrashStore::new() {
         if let Ok(n) = store.empty_trash(Some(AUTO_PURGE_DAYS)) {
             if n > 0 {
-                println!(
-                    "Auto-removed {} trash session(s) older than {} days.\n",
-                    n, AUTO_PURGE_DAYS
-                );
+                println!("Auto-removed {n} trash session(s) older than {AUTO_PURGE_DAYS} days.\n");
             }
         }
     }
@@ -70,13 +67,15 @@ fn main() -> Result<()> {
         None => {}
     }
 
-    let app_path = cli.app.ok_or_else(|| anyhow::anyhow!("a .app path is required\n\nUsage: appclean <APP>\n       appclean restore"))?;
-    cmd_clean(app_path, cli.dry_run, cli.yes, cli.permanent)
+    let app_path = cli.app.ok_or_else(|| {
+        anyhow::anyhow!("a .app path is required\n\nUsage: appclean <APP>\n       appclean restore")
+    })?;
+    cmd_clean(&app_path, cli.dry_run, cli.yes, cli.permanent)
 }
 
-fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Result<()> {
+fn cmd_clean(app_path: &Path, dry_run: bool, yes: bool, permanent: bool) -> Result<()> {
     // 1. Parse the .app bundle
-    let bundle = AppBundle::from_path(&app_path)?;
+    let bundle = AppBundle::from_path(app_path)?;
     println!("Scanning for files associated with {}…", bundle.name);
 
     // 2. Scan with a spinner so the terminal doesn't feel frozen on large libraries
@@ -135,11 +134,11 @@ fn cmd_empty_trash(older_than: Option<u64>) -> Result<()> {
 
     if removed == 0 {
         match older_than {
-            Some(days) => println!("No sessions older than {} day(s) found.", days),
+            Some(days) => println!("No sessions older than {days} day(s) found."),
             None => println!("Trash is already empty."),
         }
     } else {
-        println!("Permanently removed {} session(s) from trash.", removed);
+        println!("Permanently removed {removed} session(s) from trash.");
     }
 
     Ok(())

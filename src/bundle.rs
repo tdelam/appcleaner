@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub struct AppBundle {
     pub path: PathBuf,
-    /// Display name (CFBundleName or stem of the .app filename)
+    /// Display name (`CFBundleName` or stem of the .app filename)
     pub name: String,
     /// Reverse-DNS identifier, e.g. "com.tinyspeck.slackmacgap"
     pub bundle_id: String,
@@ -30,6 +30,11 @@ struct InfoPlist {
 }
 
 impl AppBundle {
+    /// Parse an `.app` bundle at `path` and extract its name and bundle ID.
+    ///
+    /// # Errors
+    /// Returns an error if the path is not a `.app` bundle, if `Info.plist` is
+    /// missing, or if the plist cannot be parsed.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path
             .as_ref()
@@ -55,7 +60,7 @@ impl AppBundle {
                 .to_string()
         });
 
-        Ok(AppBundle {
+        Ok(Self {
             path,
             name,
             bundle_id: info.bundle_identifier,
@@ -75,7 +80,6 @@ mod tests {
 
     #[test]
     fn rejects_non_app_path() {
-        // Use a path that is guaranteed not to be a .app bundle
         let err = AppBundle::from_path("/tmp/not-an-app.dmg").unwrap_err();
         assert!(err.to_string().contains("not a .app bundle"));
     }
