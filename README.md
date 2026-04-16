@@ -16,7 +16,7 @@ The binary is named **`apc`** for quick access (same idea as `rg` for ripgrep).
 
 ## Installation
 
-Requires [Rust](https://rustup.rs) 1.70 or later.
+Requires [Rust](https://rustup.rs) 1.82 or later.
 
 ```sh
 git clone https://github.com/tdelam/appclean
@@ -123,6 +123,30 @@ Each session writes a `manifest.json` with original paths, which is what `apc re
 | `/Library/Logs/<name>` | System-level logs |
 
 > **Note:** Files under `/Library` (not `~/Library`) may require `sudo`.
+
+## Releasing a new version
+
+Releases are automated via GitHub Actions — pushing a version tag triggers a build for both Apple Silicon and Intel, and uploads the binaries to GitHub Releases automatically.
+
+Install [`cargo-release`](https://github.com/crate-ci/cargo-release) once:
+
+```sh
+cargo install cargo-release
+```
+
+Then to release:
+
+```sh
+cargo release patch   # 0.3.0 → 0.3.1  (bug fixes)
+cargo release minor   # 0.3.0 → 0.4.0  (new features)
+cargo release major   # 0.3.0 → 1.0.0  (breaking changes)
+```
+
+This will:
+1. Bump the version in `Cargo.toml`
+2. Commit the change and create a `vX.Y.Z` git tag
+3. Push the commit and tag to GitHub
+4. CI builds `apc` for `aarch64-apple-darwin` and `x86_64-apple-darwin` and attaches both archives to the release
 
 ## Contributing
 
