@@ -64,6 +64,20 @@ appclean --dry-run /Applications/Slack.app
 appclean --yes /Applications/Slack.app
 ```
 
+### Empty the trash
+
+Permanently remove all sessions from the appclean trash (frees disk space):
+
+```sh
+appclean empty-trash
+```
+
+Only remove sessions older than 30 days:
+
+```sh
+appclean empty-trash --older-than 30
+```
+
 ## Trash location
 
 By default, removed files are moved to:
@@ -74,10 +88,10 @@ By default, removed files are moved to:
 
 Each session includes a `manifest.json` that records the original file paths, which is what `appclean restore` uses to put everything back.
 
-To permanently clear the trash (free up disk space):
+To permanently clear all sessions at once:
 
 ```sh
-rm -rf ~/.appclean/trash
+appclean empty-trash
 ```
 
 ## Locations scanned

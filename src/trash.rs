@@ -154,6 +154,40 @@ impl TrashStore {
         Ok(entries)
     }
 
+    /// Permanently delete trash sessions, optionally filtering to those older
+    /// than `older_than_days` days. Returns the number of sessions removed.
+    pub fn empty_trash(&self, older_than_days: Option<u64>) -> Result<usize> {
+        let entries = self.list_entries()?;
+
+        if entries.is_empty() {
+            println!("Trash is already empty.");
+            return Ok(0);
+        }
+
+        let cutoff_secs = older_than_days.map(|d| now_secs().saturating_sub(d * 86_400));
+
+        let to_delete: Vec<_> = entries
+            .into_iter()
+            .filter(|(_, entry)| match cutoff_secs {
+                Some(cutoff) => entry.timestamp <= cutoff,
+                None => true,
+            })
+            .collect();
+
+        if to_delete.is_empty() {
+            println!("No sessions older than {} day(s) found.", older_than_days.unwrap_or(0));
+            return Ok(0);
+        }
+
+        for (session_path, _) in &to_delete {
+            std::fs::remove_dir_all(session_path)
+                .with_context(|| format!("failed to remove {}", session_path.display()))?;
+        }
+
+        println!("Permanently removed {} session(s) from trash.", to_delete.len());
+        Ok(to_delete.len())
+    }
+
     fn session_dir(&self, app_name: &str) -> PathBuf {
         let safe_name = app_name.replace(['/', ' ', '.'], "_");
         self.root.join(format!("{}-{safe_name}", now_secs()))
@@ -304,6 +338,67 @@ mod tests {
     fn list_entries_empty_when_no_trash_dir() {
         let store = make_store(PathBuf::from("/tmp/appclean-nonexistent-test-dir"));
         assert!(store.list_entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn empty_trash_removes_all_sessions() {
+        let src_dir = tempdir().unwrap();
+        let trash_dir = tempdir().unwrap();
+        let store = make_store(trash_dir.path().to_path_buf());
+
+        for name in ["app1.plist", "app2.plist"] {
+            let file = src_dir.path().join(name);
+            std::fs::write(&file, "x").unwrap();
+            store.move_to_trash(&[make_found_file(file)], name).unwrap();
+        }
+
+        assert_eq!(store.list_entries().unwrap().len(), 2);
+        let removed = store.empty_trash(None).unwrap();
+        assert_eq!(removed, 2);
+        assert_eq!(store.list_entries().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn empty_trash_older_than_keeps_recent_sessions() {
+        let src_dir = tempdir().unwrap();
+        let trash_dir = tempdir().unwrap();
+        let store = make_store(trash_dir.path().to_path_buf());
+
+        // Manually insert a session with an old timestamp
+        let old_session = trash_dir.path().join("old_session");
+        std::fs::create_dir_all(&old_session).unwrap();
+        let old_entry = TrashEntry {
+            app_name: "OldApp".to_string(),
+            timestamp: 1_000_000, // very old unix timestamp
+            items: vec![],
+        };
+        std::fs::write(
+            old_session.join(MANIFEST_FILE),
+            serde_json::to_string(&old_entry).unwrap(),
+        ).unwrap();
+
+        // Add a recent session via the normal flow
+        let file = src_dir.path().join("recent.plist");
+        std::fs::write(&file, "x").unwrap();
+        store.move_to_trash(&[make_found_file(file)], "RecentApp").unwrap();
+
+        assert_eq!(store.list_entries().unwrap().len(), 2);
+
+        // Empty sessions older than 30 days — should only remove the old one
+        let removed = store.empty_trash(Some(30)).unwrap();
+        assert_eq!(removed, 1);
+
+        let remaining = store.list_entries().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].1.app_name, "RecentApp");
+    }
+
+    #[test]
+    fn empty_trash_on_empty_store_is_a_no_op() {
+        let trash_dir = tempdir().unwrap();
+        let store = make_store(trash_dir.path().to_path_buf());
+        let removed = store.empty_trash(None).unwrap();
+        assert_eq!(removed, 0);
     }
 
     #[test]

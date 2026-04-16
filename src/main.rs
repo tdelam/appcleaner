@@ -39,13 +39,21 @@ struct Cli {
 enum Command {
     /// Restore files from a previous appclean trash session
     Restore,
+    /// Permanently delete sessions from the appclean trash
+    EmptyTrash {
+        /// Only remove sessions older than this many days
+        #[arg(long, value_name = "DAYS")]
+        older_than: Option<u64>,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if let Some(Command::Restore) = cli.command {
-        return cmd_restore();
+    match cli.command {
+        Some(Command::Restore) => return cmd_restore(),
+        Some(Command::EmptyTrash { older_than }) => return cmd_empty_trash(older_than),
+        None => {}
     }
 
     let app_path = cli.app.ok_or_else(|| anyhow::anyhow!("a .app path is required\n\nUsage: appclean <APP>\n       appclean restore"))?;
@@ -104,6 +112,19 @@ fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Re
         trash::TrashStore::new()?.move_to_trash(&selected, &bundle.name)?;
     }
 
+    Ok(())
+}
+
+fn cmd_empty_trash(older_than: Option<u64>) -> Result<()> {
+    let store = trash::TrashStore::new()?;
+
+    if let Some(days) = older_than {
+        println!("Permanently removing trash sessions older than {} day(s)…", days);
+    } else {
+        println!("Permanently removing all sessions from trash…");
+    }
+
+    store.empty_trash(older_than)?;
     Ok(())
 }
 
