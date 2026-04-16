@@ -78,6 +78,17 @@ Only remove sessions older than 30 days:
 appclean empty-trash --older-than 30
 ```
 
+## Trash retention
+
+Sessions in the trash are **automatically purged after 30 days** on every run. You will see a one-line notice if anything was cleaned up. This prevents the trash from growing indefinitely.
+
+To empty it manually at any time:
+
+```sh
+appclean empty-trash                  # remove everything
+appclean empty-trash --older-than 7   # remove sessions older than 7 days
+```
+
 ## Trash location
 
 By default, removed files are moved to:

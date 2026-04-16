@@ -160,7 +160,6 @@ impl TrashStore {
         let entries = self.list_entries()?;
 
         if entries.is_empty() {
-            println!("Trash is already empty.");
             return Ok(0);
         }
 
@@ -175,7 +174,6 @@ impl TrashStore {
             .collect();
 
         if to_delete.is_empty() {
-            println!("No sessions older than {} day(s) found.", older_than_days.unwrap_or(0));
             return Ok(0);
         }
 
@@ -184,7 +182,6 @@ impl TrashStore {
                 .with_context(|| format!("failed to remove {}", session_path.display()))?;
         }
 
-        println!("Permanently removed {} session(s) from trash.", to_delete.len());
         Ok(to_delete.len())
     }
 
@@ -399,6 +396,22 @@ mod tests {
         let store = make_store(trash_dir.path().to_path_buf());
         let removed = store.empty_trash(None).unwrap();
         assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn auto_purge_does_not_remove_recent_sessions() {
+        let src_dir = tempdir().unwrap();
+        let trash_dir = tempdir().unwrap();
+        let store = make_store(trash_dir.path().to_path_buf());
+
+        // Recent session — should survive a 30-day purge
+        let file = src_dir.path().join("recent.plist");
+        std::fs::write(&file, "x").unwrap();
+        store.move_to_trash(&[make_found_file(file)], "RecentApp").unwrap();
+
+        let removed = store.empty_trash(Some(30)).unwrap();
+        assert_eq!(removed, 0, "recent session should not be auto-purged");
+        assert_eq!(store.list_entries().unwrap().len(), 1);
     }
 
     #[test]

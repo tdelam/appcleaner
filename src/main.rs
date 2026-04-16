@@ -47,8 +47,23 @@ enum Command {
     },
 }
 
+const AUTO_PURGE_DAYS: u64 = 30;
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Silently purge sessions older than 30 days on every run to prevent
+    // the trash from growing indefinitely without user intervention.
+    if let Ok(store) = trash::TrashStore::new() {
+        if let Ok(n) = store.empty_trash(Some(AUTO_PURGE_DAYS)) {
+            if n > 0 {
+                println!(
+                    "Auto-removed {} trash session(s) older than {} days.\n",
+                    n, AUTO_PURGE_DAYS
+                );
+            }
+        }
+    }
 
     match cli.command {
         Some(Command::Restore) => return cmd_restore(),
@@ -117,14 +132,17 @@ fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Re
 
 fn cmd_empty_trash(older_than: Option<u64>) -> Result<()> {
     let store = trash::TrashStore::new()?;
+    let removed = store.empty_trash(older_than)?;
 
-    if let Some(days) = older_than {
-        println!("Permanently removing trash sessions older than {} day(s)…", days);
+    if removed == 0 {
+        match older_than {
+            Some(days) => println!("No sessions older than {} day(s) found.", days),
+            None => println!("Trash is already empty."),
+        }
     } else {
-        println!("Permanently removing all sessions from trash…");
+        println!("Permanently removed {} session(s) from trash.", removed);
     }
 
-    store.empty_trash(older_than)?;
     Ok(())
 }
 
