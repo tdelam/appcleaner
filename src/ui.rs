@@ -57,8 +57,10 @@ fn format_entry(f: &FoundFile) -> String {
     } else {
         String::new()
     };
+    // Padding against colored strings is intentionally avoided — ANSI escape codes
+    // inflate the string length and break Rust's format-width calculation.
     format!(
-        "{:<60}{:>10}{}",
+        "{}  {}{}",
         f.path.display(),
         ByteSize(f.size).to_string().yellow(),
         tag
