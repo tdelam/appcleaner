@@ -20,7 +20,6 @@ struct Cli {
     command: Option<Command>,
 
     /// Path to the .app bundle (e.g. /Applications/Slack.app)
-    #[arg(required_unless_present = "command")]
     app: Option<PathBuf>,
 
     /// Show what would be deleted without deleting anything
@@ -49,7 +48,7 @@ fn main() -> Result<()> {
         return cmd_restore();
     }
 
-    let app_path = cli.app.expect("app path is required when not using a subcommand");
+    let app_path = cli.app.ok_or_else(|| anyhow::anyhow!("a .app path is required\n\nUsage: appclean <APP>\n       appclean restore"))?;
     cmd_clean(app_path, cli.dry_run, cli.yes, cli.permanent)
 }
 
