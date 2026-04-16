@@ -17,7 +17,7 @@ A macOS command-line app cleaner. When you drag an app to the Trash, macOS leave
 Requires [Rust](https://rustup.rs) 1.70 or later.
 
 ```sh
-git clone https://github.com/<your-username>/appclean
+git clone https://github.com/tdelam/appclean
 cd appclean
 cargo install --path .
 ```

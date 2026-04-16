@@ -10,7 +10,7 @@ Thanks for your interest in contributing to appclean!
 ## Building locally
 
 ```sh
-git clone https://github.com/<your-username>/appclean
+git clone https://github.com/tdelam/appclean
 cd appclean
 cargo build
 ```
