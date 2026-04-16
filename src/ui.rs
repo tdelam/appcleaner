@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::Result;
 use bytesize::ByteSize;
 use colored::Colorize;
@@ -61,8 +63,19 @@ fn format_entry(f: &FoundFile) -> String {
     // inflate the string length and break Rust's format-width calculation.
     format!(
         "{}  {}{}",
-        f.path.display(),
+        shorten_path(&f.path),
         ByteSize(f.size).to_string().yellow(),
         tag
     )
+}
+
+/// Replace the home directory prefix with `~` to keep paths short enough
+/// that they don't wrap inside the multi-select widget.
+fn shorten_path(path: &Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(stripped) = path.strip_prefix(&home) {
+            return format!("~/{}", stripped.display());
+        }
+    }
+    path.display().to_string()
 }
