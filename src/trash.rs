@@ -4,6 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use time::macros::format_description;
 
 use crate::scanner::FoundFile;
 
@@ -34,16 +36,17 @@ pub struct TrashItem {
 impl TrashEntry {
     /// Human-readable label used in the restore selection list.
     pub fn label(&self) -> String {
-        let secs = self.timestamp;
-        let hours = (secs % 86400) / 3600;
-        let mins = (secs % 3600) / 60;
+        let fmt = format_description!("[year]-[month]-[day] [hour]:[minute] UTC");
+        let date = OffsetDateTime::from_unix_timestamp(self.timestamp as i64)
+            .ok()
+            .and_then(|dt| dt.format(fmt).ok())
+            .unwrap_or_else(|| self.timestamp.to_string());
+
         format!(
-            "{}  —  {} item(s) trashed at {:02}:{:02} UTC (unix: {})",
+            "{}  —  {} item(s) trashed on {}",
             self.app_name,
             self.items.len(),
-            hours,
-            mins,
-            self.timestamp,
+            date,
         )
     }
 }
