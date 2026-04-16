@@ -7,7 +7,7 @@ use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 
-use appclean::{bundle, cleaner, scanner, trash, ui};
+use appclean::{cleaner, trash, ui, AppBundle, Scanner, TrashStore};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -54,7 +54,7 @@ fn main() -> Result<()> {
 
     // Silently purge sessions older than 30 days on every run to prevent
     // the trash from growing indefinitely without user intervention.
-    if let Ok(store) = trash::TrashStore::new() {
+    if let Ok(store) = TrashStore::new() {
         if let Ok(n) = store.empty_trash(Some(AUTO_PURGE_DAYS)) {
             if n > 0 {
                 println!(
@@ -77,7 +77,7 @@ fn main() -> Result<()> {
 
 fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Result<()> {
     // 1. Parse the .app bundle
-    let bundle = bundle::AppBundle::from_path(&app_path)?;
+    let bundle = AppBundle::from_path(&app_path)?;
     println!("Scanning for files associated with {}…", bundle.name);
 
     // 2. Scan with a spinner so the terminal doesn't feel frozen on large libraries
@@ -90,7 +90,7 @@ fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Re
     spinner.enable_steady_tick(Duration::from_millis(80));
     spinner.set_message("searching…");
 
-    let scanner = scanner::Scanner::new()?;
+    let scanner = Scanner::new()?;
     let found = scanner.scan(&bundle)?;
 
     spinner.finish_and_clear();
@@ -124,14 +124,14 @@ fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Re
     if permanent {
         cleaner::delete_files(&selected)?;
     } else {
-        trash::TrashStore::new()?.move_to_trash(&selected, &bundle.name)?;
+        TrashStore::new()?.move_to_trash(&selected, &bundle.name)?;
     }
 
     Ok(())
 }
 
 fn cmd_empty_trash(older_than: Option<u64>) -> Result<()> {
-    let store = trash::TrashStore::new()?;
+    let store = TrashStore::new()?;
     let removed = store.empty_trash(older_than)?;
 
     if removed == 0 {
@@ -147,7 +147,7 @@ fn cmd_empty_trash(older_than: Option<u64>) -> Result<()> {
 }
 
 fn cmd_restore() -> Result<()> {
-    let entries = trash::TrashStore::new()?.list_entries()?;
+    let entries = TrashStore::new()?.list_entries()?;
 
     if entries.is_empty() {
         println!("No items in the appclean trash.");
