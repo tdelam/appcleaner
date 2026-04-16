@@ -4,7 +4,6 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use dialoguer::{theme::ColorfulTheme, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 
 use appclean::{cleaner, trash, ui, AppBundle, Scanner, TrashStore};
@@ -156,11 +155,10 @@ fn cmd_restore() -> Result<()> {
 
     let labels: Vec<String> = entries.iter().map(|(_, e)| e.label()).collect();
 
-    let selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Select a session to restore")
-        .items(&labels)
-        .default(0)
-        .interact()?;
+    let Some(selection) = ui::select_from_list("Select a session to restore", &labels)? else {
+        println!("Aborted.");
+        return Ok(());
+    };
 
     let (session_path, entry) = &entries[selection];
 
