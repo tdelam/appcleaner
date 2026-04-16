@@ -3,6 +3,12 @@ name = "appclean"
 version = "0.1.0"
 edition = "2021"
 description = "A macOS app cleaner that removes all associated files when uninstalling applications"
+license = "MIT"
+repository = "https://github.com/<your-username>/appclean"
+homepage = "https://github.com/<your-username>/appclean"
+readme = "README.md"
+keywords = ["macos", "uninstaller", "cleaner", "cli"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "appclean"
