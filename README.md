@@ -1,20 +1,20 @@
 # appclean
 
-A macOS command-line app cleaner. When you drag an app to the Trash, macOS leaves behind preference files, caches, support data, and more scattered across `~/Library`. `appclean` finds and removes all of it.
+A macOS command-line app cleaner. When you drag an app to the Trash, macOS leaves behind preference files, caches, support data, and more scattered across `~/Library`. `appclean` finds and removes all of it — interactively, with a recoverable trash.
+
+The binary is named **`ac`** for quick access (same idea as `rg` for ripgrep).
 
 ## Features
 
-- Scans all standard macOS library locations for associated files
-- Interactive multi-select — choose exactly what to remove
-- **Moves files to a recoverable trash by default** — restore at any time with `appclean restore`
+- Full terminal UI — navigate with keyboard, toggle files, confirm before deleting
+- **Recoverable trash by default** — `ac restore` brings everything back
 - `--permanent` to skip the trash and delete immediately
 - `--dry-run` to preview what would be removed without touching anything
-- Progress bar during move/delete
+- Inline size bars and color-coded file types for fast visual scanning
 - Matches by both bundle ID (`com.tinyspeck.slackmacgap`) and app name (`Slack`)
+- Auto-purges trash sessions older than 30 days on every run
 
 ## Installation
-
-### From source
 
 Requires [Rust](https://rustup.rs) 1.70 or later.
 
@@ -24,86 +24,84 @@ cd appclean
 cargo install --path .
 ```
 
+This installs the `ac` binary into `~/.cargo/bin/`.
+
 ## Usage
 
-### Remove an app (recoverable — default)
+### Remove an app
 
-Files are moved to `~/.appclean/trash/` rather than permanently deleted.
+Files are moved to `~/.appclean/trash/` — restore them at any time.
 
 ```sh
-appclean /Applications/Slack.app
+ac /Applications/Slack.app
 ```
+
+The interactive file selector opens in the terminal:
+
+```
+┌ Slack — 6/6 selected  (1.4 GB) ──────────────────────────────────────────────┐
+│ ◉ /Applications/Slack.app                         ██████   286 MB  [app]     │
+│ ◉ ~/Library/Application Support/Slack             ██████   960 MB            │
+│ ◉ ~/Library/Caches/com.tinyspeck.slackmacgap      ███░░░   142 MB            │
+│ ◉ ~/Library/Preferences/com.tinyspeck…plist       ░░░░░░     4 KB            │
+└───────────────────────────────────────────────────────────────────────────────┘
+  ↑↓/jk Navigate    Space Toggle    a Toggle all    Enter Confirm    q Quit
+```
+
+**Color key:** red = app bundle · yellow = cache · blue = preferences · magenta = containers · cyan = logs
+
+**Keys:** `↑`/`↓` or `j`/`k` navigate · `Space` toggle · `a` toggle all · `Enter` confirm · `q` quit
 
 ### Restore a previous removal
 
+```sh
+ac restore
+```
+
 Lists all past sessions and lets you pick one to restore.
 
+### Remove permanently (no trash)
+
 ```sh
-appclean restore
+ac --permanent /Applications/Slack.app
 ```
 
-### Remove an app permanently
-
-Skips the trash and deletes immediately. **This cannot be undone.**
+### Preview without deleting
 
 ```sh
-appclean --permanent /Applications/Slack.app
-```
-
-### Preview what would be removed
-
-Shows everything that would be removed without touching anything.
-
-```sh
-appclean --dry-run /Applications/Slack.app
+ac --dry-run /Applications/Slack.app
 ```
 
 ### Skip the confirmation prompt
 
 ```sh
-appclean --yes /Applications/Slack.app
+ac --yes /Applications/Slack.app
 ```
 
 ### Empty the trash
 
-Permanently remove all sessions from the appclean trash (frees disk space):
-
 ```sh
-appclean empty-trash
-```
-
-Only remove sessions older than 30 days:
-
-```sh
-appclean empty-trash --older-than 30
+ac empty-trash                  # remove all sessions
+ac empty-trash --older-than 30  # remove sessions older than 30 days
 ```
 
 ## Trash retention
 
-Sessions in the trash are **automatically purged after 30 days** on every run. You will see a one-line notice if anything was cleaned up. This prevents the trash from growing indefinitely.
-
-To empty it manually at any time:
+Sessions are **automatically purged after 30 days** on every run. A one-line notice appears if anything was cleaned up. To empty manually:
 
 ```sh
-appclean empty-trash                  # remove everything
-appclean empty-trash --older-than 7   # remove sessions older than 7 days
+ac empty-trash
 ```
 
 ## Trash location
 
-By default, removed files are moved to:
+Removed files are moved to:
 
 ```
 ~/.appclean/trash/<timestamp>-<AppName>/
 ```
 
-Each session includes a `manifest.json` that records the original file paths, which is what `appclean restore` uses to put everything back.
-
-To permanently clear all sessions at once:
-
-```sh
-appclean empty-trash
-```
+Each session writes a `manifest.json` with original paths, which is what `ac restore` uses to put everything back.
 
 ## Locations scanned
 
@@ -115,12 +113,16 @@ appclean empty-trash
 | `~/Library/Logs/<name>` | Log files |
 | `~/Library/Containers/<bundle-id>` | Sandboxed app container |
 | `~/Library/Group Containers/<bundle-id>` | Shared container |
+| `~/Library/Cookies/<bundle-id>` | Cookies |
 | `~/Library/Saved Application State/<name>.savedState` | Window state |
+| `~/Library/WebKit/<bundle-id>` | WebKit storage |
+| `~/Library/HTTPStorages/<bundle-id>` | HTTP caches |
 | `/Library/Application Support/<name>` | System-level app data |
 | `/Library/Caches/<bundle-id>` | System-level cache |
 | `/Library/Preferences/<bundle-id>.plist` | System-level preferences |
+| `/Library/Logs/<name>` | System-level logs |
 
-> **Note:** Deleting files under `/Library` may require running with `sudo`.
+> **Note:** Files under `/Library` (not `~/Library`) may require `sudo`.
 
 ## Contributing
 
