@@ -224,16 +224,21 @@ pub fn restore(session_path: &Path, entry: &TrashEntry) -> Result<()> {
     pb.finish_and_clear();
 
     if errors.is_empty() {
-        let _ = std::fs::remove_dir_all(session_path);
-        println!("Restored {} item(s).", entry.items.len());
-    } else {
-        eprintln!("{} error(s) during restore:", errors.len());
-        for e in &errors {
-            eprintln!("  {e}");
+        if let Err(e) = std::fs::remove_dir_all(session_path) {
+            eprintln!("warning: could not remove trash session directory: {e}");
         }
+        println!("Restored {} item(s).", entry.items.len());
+        Ok(())
+    } else {
+        for e in &errors {
+            eprintln!("  error: {e}");
+        }
+        anyhow::bail!(
+            "{} of {} item(s) could not be restored",
+            errors.len(),
+            entry.items.len()
+        )
     }
-
-    Ok(())
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

@@ -43,17 +43,15 @@ pub fn delete_files(files: &[FoundFile]) -> Result<()> {
 
     if errors.is_empty() {
         println!("Done. Removed {} item(s).", files.len());
+        Ok(())
     } else {
-        println!(
-            "Done with {} error(s). {} of {} item(s) removed.",
-            errors.len(),
-            files.len() - errors.len(),
-            files.len()
-        );
         for e in &errors {
             eprintln!("  error: {e}");
         }
+        anyhow::bail!(
+            "{} of {} item(s) could not be removed",
+            errors.len(),
+            files.len()
+        )
     }
-
-    Ok(())
 }
