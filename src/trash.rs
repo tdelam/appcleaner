@@ -35,10 +35,12 @@ pub struct TrashItem {
 
 impl TrashEntry {
     /// Human-readable label used in the restore selection list.
+    #[must_use]
     pub fn label(&self) -> String {
         let fmt = format_description!("[year]-[month]-[day] [hour]:[minute] UTC");
-        let date = OffsetDateTime::from_unix_timestamp(self.timestamp as i64)
+        let date = i64::try_from(self.timestamp)
             .ok()
+            .and_then(|ts| OffsetDateTime::from_unix_timestamp(ts).ok())
             .and_then(|dt| dt.format(fmt).ok())
             .unwrap_or_else(|| self.timestamp.to_string());
 
@@ -61,13 +63,21 @@ pub struct TrashStore {
 
 impl TrashStore {
     /// Create a store rooted at `~/.appclean/trash/`.
+    ///
+    /// # Errors
+    /// Returns an error if the home directory cannot be determined.
     pub fn new() -> Result<Self> {
         let home = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
-        Ok(TrashStore { root: home.join(TRASH_DIR_NAME) })
+        Ok(Self { root: home.join(TRASH_DIR_NAME) })
     }
 
     /// Move `files` into the trash and return the resulting [`TrashEntry`].
+    ///
+    /// # Errors
+    /// Returns an error if the trash session directory cannot be created or if
+    /// the manifest cannot be written. Individual file move errors are printed
+    /// as warnings but do not abort the operation.
     pub fn move_to_trash(&self, files: &[FoundFile], app_name: &str) -> Result<TrashEntry> {
         let session_dir = self.session_dir(app_name);
         std::fs::create_dir_all(&session_dir)
@@ -129,6 +139,10 @@ impl TrashStore {
     }
 
     /// List all trash sessions found under this store's root, newest first.
+    ///
+    /// # Errors
+    /// Returns an error if the trash directory cannot be read or a manifest
+    /// cannot be parsed.
     pub fn list_entries(&self) -> Result<Vec<(PathBuf, TrashEntry)>> {
         if !self.root.exists() {
             return Ok(Vec::new());
@@ -138,7 +152,7 @@ impl TrashStore {
 
         for dir_entry in std::fs::read_dir(&self.root)
             .with_context(|| format!("failed to read trash dir {}", self.root.display()))?
-            .filter_map(|e| e.ok())
+            .filter_map(Result::ok)
         {
             let manifest = dir_entry.path().join(MANIFEST_FILE);
             if !manifest.exists() {
@@ -159,6 +173,9 @@ impl TrashStore {
 
     /// Permanently delete trash sessions, optionally filtering to those older
     /// than `older_than_days` days. Returns the number of sessions removed.
+    ///
+    /// # Errors
+    /// Returns an error if any session directory cannot be removed.
     pub fn empty_trash(&self, older_than_days: Option<u64>) -> Result<usize> {
         let entries = self.list_entries()?;
 
@@ -170,10 +187,7 @@ impl TrashStore {
 
         let to_delete: Vec<_> = entries
             .into_iter()
-            .filter(|(_, entry)| match cutoff_secs {
-                Some(cutoff) => entry.timestamp <= cutoff,
-                None => true,
-            })
+            .filter(|(_, entry)| cutoff_secs.is_none_or(|cutoff| entry.timestamp <= cutoff))
             .collect();
 
         if to_delete.is_empty() {
@@ -195,6 +209,10 @@ impl TrashStore {
 }
 
 /// Move all items in `entry` back to their original locations.
+///
+/// # Errors
+/// Returns an error if any item cannot be moved back. Successfully restored
+/// items are not rolled back on partial failure.
 pub fn restore(session_path: &Path, entry: &TrashEntry) -> Result<()> {
     let pb = ProgressBar::new(entry.items.len() as u64);
     pb.set_style(

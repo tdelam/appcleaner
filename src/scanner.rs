@@ -18,7 +18,7 @@ impl FoundFile {
     fn new(path: PathBuf) -> Self {
         let is_bundle = path.extension().and_then(|e| e.to_str()) == Some("app");
         let size = compute_size(&path);
-        FoundFile { path, size, is_bundle }
+        Self { path, size, is_bundle }
     }
 }
 
@@ -27,14 +27,24 @@ pub struct Scanner {
 }
 
 impl Scanner {
+    /// Create a scanner rooted at the current user's home directory.
+    ///
+    /// # Errors
+    /// Returns an error if the home directory cannot be determined.
     pub fn new() -> Result<Self> {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("could not determine home directory"))?;
-        Ok(Scanner { home_dir })
+        Ok(Self { home_dir })
     }
 
     /// Scan for all files and directories associated with `bundle`.
+    ///
     /// The bundle itself is always the first entry in the returned list.
+    /// Remaining entries are sorted by size descending.
+    ///
+    /// # Errors
+    /// Returns an error if the home directory is unavailable (propagated from
+    /// construction — in practice infallible once `Scanner::new` succeeds).
     pub fn scan(&self, bundle: &AppBundle) -> Result<Vec<FoundFile>> {
         let mut found = vec![FoundFile::new(bundle.path.clone())];
 
@@ -45,7 +55,7 @@ impl Scanner {
             if !dir.exists() {
                 continue;
             }
-            self.scan_dir(&dir, &terms, &mut found);
+            scan_dir(&dir, &terms, &mut found);
         }
 
         // Sort by size descending so the largest items appear first (skip index 0 — the bundle)
@@ -72,25 +82,6 @@ impl Scanner {
             PathBuf::from("/Library/Logs"),
         ]
     }
-
-    fn scan_dir(&self, dir: &Path, terms: &MatchTerms, found: &mut Vec<FoundFile>) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return, // skip unreadable directories (e.g. permission denied)
-        };
-
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            let file_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n.to_string(),
-                None => continue,
-            };
-
-            if is_match(&file_name, terms) {
-                found.push(FoundFile::new(path));
-            }
-        }
-    }
 }
 
 /// Lowercased bundle terms computed once per scan and reused for every entry.
@@ -101,9 +92,26 @@ struct MatchTerms {
 
 impl MatchTerms {
     fn from_bundle(bundle: &AppBundle) -> Self {
-        MatchTerms {
+        Self {
             bundle_id: bundle.bundle_id.to_lowercase(),
             app_name: bundle.name.to_lowercase(),
+        }
+    }
+}
+
+fn scan_dir(dir: &Path, terms: &MatchTerms, found: &mut Vec<FoundFile>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return; // skip unreadable directories (e.g. permission denied)
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if is_match(file_name, terms) {
+            found.push(FoundFile::new(path));
         }
     }
 }
@@ -140,9 +148,9 @@ fn compute_size(path: &Path) -> u64 {
     }
     WalkDir::new(path)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
+        .filter(std::fs::Metadata::is_file)
         .map(|m| m.len())
         .sum()
 }

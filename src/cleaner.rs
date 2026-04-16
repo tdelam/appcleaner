@@ -3,8 +3,11 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::scanner::FoundFile;
 
-/// Delete all given files/directories, showing a progress bar.
-/// Returns Ok even if some deletions fail — errors are printed and counted.
+/// Permanently delete all given files/directories, showing a progress bar.
+///
+/// # Errors
+/// Returns an error listing how many items could not be removed if any
+/// deletion fails. Individual errors are printed to stderr before returning.
 pub fn delete_files(files: &[FoundFile]) -> Result<()> {
     let pb = ProgressBar::new(files.len() as u64);
     pb.set_style(
