@@ -1,0 +1,10 @@
+# cargo-release configuration
+# Install: cargo install cargo-release
+# Usage:   cargo release patch / minor / major
+
+sign-commit = false
+sign-tag = false
+push = true
+publish = false
+pre-release-commit-message = "chore: release {{version}}"
+tag-message = "Release {{version}}"
