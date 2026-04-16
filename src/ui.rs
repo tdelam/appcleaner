@@ -84,6 +84,7 @@ pub fn show_dry_run(files: &[FoundFile]) {
 fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) -> Result<Vec<FoundFile>> {
     let mut selected = vec![true; files.len()];
     let mut cursor = 0usize;
+    let max_size = files.iter().map(|f| f.size).max().unwrap_or(1).max(1);
 
     loop {
         terminal.draw(|f| {
@@ -93,32 +94,63 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) ->
                 .constraints([Constraint::Min(3), Constraint::Length(3)])
                 .split(area);
 
-            // Reserve space for checkbox (5) + two spaces (2) + size (9) + tag (6) + borders (2)
-            let path_width = (area.width as usize).saturating_sub(24);
+            // columns: check(3) + path + bar_with_gaps(8) + size(9) + tag(6) + borders(2) = 28
+            let path_width = (area.width as usize).saturating_sub(28);
 
             let items: Vec<ListItem> = files
                 .iter()
                 .enumerate()
                 .map(|(i, file)| {
-                    let checkbox = if selected[i] { "[✓]" } else { "[ ]" };
-                    let path = shorten_path(&file.path);
-                    let path_display = truncate_left(&path, path_width);
-                    let size = format!("{:>9}", ByteSize(file.size).to_string());
-                    let tag = if file.is_bundle { " [app]" } else { "      " };
+                    let is_sel = selected[i];
 
-                    let style = if i == cursor {
-                        Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
-                    } else if selected[i] {
-                        Style::default().fg(Color::Green)
+                    let check_span = Span::styled(
+                        if is_sel { " ◉ " } else { " ○ " },
+                        if is_sel {
+                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    );
+
+                    let path = shorten_path(&file.path);
+                    let path_display = format!("{:<path_width$}", truncate_left(&path, path_width));
+                    let path_color = if !is_sel {
+                        Color::DarkGray
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        file_type_color(&file.path)
+                    };
+                    let path_span = Span::styled(
+                        path_display,
+                        Style::default().fg(path_color),
+                    );
+
+                    let bar = size_bar(file.size, max_size, 6);
+                    let bar_span = Span::styled(
+                        format!(" {bar} "),
+                        if is_sel {
+                            Style::default().fg(Color::Cyan)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    );
+
+                    let size_span = Span::styled(
+                        format!("{:>9}", ByteSize(file.size).to_string()),
+                        if is_sel {
+                            Style::default().fg(Color::Yellow)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        },
+                    );
+
+                    let tag_span = if file.is_bundle {
+                        Span::styled(" [app]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                    } else {
+                        Span::raw("      ")
                     };
 
                     ListItem::new(Line::from(vec![
-                        Span::styled(
-                            format!(" {checkbox} {path_display:<path_width$}  {size}{tag}"),
-                            style,
-                        ),
+                        check_span, path_span, bar_span, size_span, tag_span,
                     ]))
                 })
                 .collect();
@@ -131,25 +163,42 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) ->
                 .map(|(_, f)| f.size)
                 .sum();
 
-            let title = format!(
-                " {} — {}/{} selected  ({}) ",
-                app_name,
-                selected_count,
-                files.len(),
-                ByteSize(selected_bytes),
-            );
+            let title = Line::from(vec![
+                Span::raw(" "),
+                Span::styled(app_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!(" — {}/{} selected  ({}) ", selected_count, files.len(), ByteSize(selected_bytes)),
+                    Style::default().fg(Color::White),
+                ),
+            ]);
 
             let list = List::new(items)
-                .block(Block::default().borders(Borders::ALL).title(title));
+                .block(Block::default().borders(Borders::ALL).title(title))
+                .highlight_style(
+                    Style::default()
+                        .bg(Color::Rgb(45, 45, 65))
+                        .add_modifier(Modifier::BOLD),
+                );
             let mut state = ListState::default().with_selected(Some(cursor));
             f.render_stateful_widget(list, chunks[0], &mut state);
 
-            let help = Paragraph::new(
-                " ↑/k ↓/j  Navigate    Space  Toggle    a  Toggle all    Enter  Confirm    q  Quit",
-            )
-            .block(Block::default().borders(Borders::ALL))
-            .style(Style::default().fg(Color::DarkGray));
-            f.render_widget(help, chunks[1]);
+            let help = Line::from(vec![
+                Span::raw(" "),
+                Span::styled("↑↓/jk", Style::default().fg(Color::Cyan)),
+                Span::raw(" Navigate    "),
+                Span::styled("Space", Style::default().fg(Color::Cyan)),
+                Span::raw(" Toggle    "),
+                Span::styled("a", Style::default().fg(Color::Cyan)),
+                Span::raw(" Toggle all    "),
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::raw(" Confirm    "),
+                Span::styled("q", Style::default().fg(Color::Red)),
+                Span::raw(" Quit"),
+            ]);
+            f.render_widget(
+                Paragraph::new(help).block(Block::default().borders(Borders::ALL)),
+                chunks[1],
+            );
         })?;
 
         if event::poll(Duration::from_millis(50))? {
@@ -203,8 +252,8 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
             let vchunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Percentage(35),
-                    Constraint::Length(9),
+                    Constraint::Percentage(30),
+                    Constraint::Length(11),
                     Constraint::Min(0),
                 ])
                 .split(area);
@@ -221,7 +270,12 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
             let dialog_area = hchunks[1];
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title(" Confirm deletion ");
+                .border_style(Style::default().fg(Color::Red))
+                .title(Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("⚠  Confirm deletion", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                ]));
             let inner = block.inner(dialog_area);
             f.render_widget(block, dialog_area);
 
@@ -229,27 +283,46 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
                 .direction(Direction::Vertical)
                 .margin(1)
                 .constraints([
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
+                    Constraint::Length(1), // padding
+                    Constraint::Length(1), // summary line
+                    Constraint::Length(1), // restore hint
+                    Constraint::Length(1), // padding
+                    Constraint::Length(1), // buttons
+                    Constraint::Length(1), // key hints
                 ])
                 .split(inner);
 
             f.render_widget(
-                Paragraph::new(format!(
-                    "Will free {} across {} item(s)",
-                    ByteSize(total_bytes),
-                    count,
-                ))
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        format!("{} item(s)", count),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" will be moved to the appclean trash  ("),
+                    Span::styled(
+                        ByteSize(total_bytes).to_string(),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(")"),
+                ]))
                 .alignment(Alignment::Center),
                 inner_chunks[1],
             );
 
+            f.render_widget(
+                Paragraph::new(
+                    Span::styled(
+                        "Restore any time with: appclean restore",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                )
+                .alignment(Alignment::Center),
+                inner_chunks[2],
+            );
+
             let yes_style = if confirm {
                 Style::default()
-                    .fg(Color::Black)
+                    .fg(Color::White)
                     .bg(Color::Red)
                     .add_modifier(Modifier::BOLD)
             } else {
@@ -266,20 +339,25 @@ fn run_confirm(terminal: &mut Tui, count: usize, total_bytes: u64) -> Result<boo
 
             f.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::raw("  "),
                     Span::styled("  Yes, delete  ", yes_style),
                     Span::raw("    "),
                     Span::styled("  No, cancel  ", no_style),
                 ]))
                 .alignment(Alignment::Center),
-                inner_chunks[3],
+                inner_chunks[4],
             );
 
             f.render_widget(
-                Paragraph::new("← →  Switch    y  Yes    n/Esc  No")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::DarkGray)),
-                inner_chunks[4],
+                Paragraph::new(Line::from(vec![
+                    Span::styled("← →", Style::default().fg(Color::Cyan)),
+                    Span::raw(" Switch    "),
+                    Span::styled("y", Style::default().fg(Color::Red)),
+                    Span::raw(" Yes    "),
+                    Span::styled("n/Esc", Style::default().fg(Color::Green)),
+                    Span::raw(" No"),
+                ]))
+                .alignment(Alignment::Center),
+                inner_chunks[5],
             );
         })?;
 
@@ -320,26 +398,43 @@ fn run_list_selector(terminal: &mut Tui, prompt: &str, items: &[String]) -> Resu
                 .enumerate()
                 .map(|(i, item)| {
                     let style = if i == cursor {
-                        Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default()
+                        Style::default().fg(Color::White)
                     };
                     ListItem::new(Span::styled(format!(" {item} "), style))
                 })
                 .collect();
 
-            let list = List::new(list_items).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" {prompt} ")),
-            );
+            let title = Line::from(vec![
+                Span::raw(" "),
+                Span::styled(prompt, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::raw(" "),
+            ]);
+
+            let list = List::new(list_items)
+                .block(Block::default().borders(Borders::ALL).title(title))
+                .highlight_style(
+                    Style::default()
+                        .bg(Color::Rgb(45, 45, 65))
+                        .add_modifier(Modifier::BOLD),
+                );
             let mut state = ListState::default().with_selected(Some(cursor));
             f.render_stateful_widget(list, chunks[0], &mut state);
 
-            let help = Paragraph::new(" ↑/k ↓/j  Navigate    Enter  Select    q  Quit")
-                .block(Block::default().borders(Borders::ALL))
-                .style(Style::default().fg(Color::DarkGray));
-            f.render_widget(help, chunks[1]);
+            let help = Line::from(vec![
+                Span::raw(" "),
+                Span::styled("↑↓/jk", Style::default().fg(Color::Cyan)),
+                Span::raw(" Navigate    "),
+                Span::styled("Enter", Style::default().fg(Color::Green)),
+                Span::raw(" Select    "),
+                Span::styled("q", Style::default().fg(Color::Red)),
+                Span::raw(" Quit"),
+            ]);
+            f.render_widget(
+                Paragraph::new(help).block(Block::default().borders(Borders::ALL)),
+                chunks[1],
+            );
         })?;
 
         if event::poll(Duration::from_millis(50))? {
@@ -387,6 +482,34 @@ fn truncate_left(s: &str, max: usize) -> String {
     format!("…{}", &s[s.len() - max.saturating_sub(1)..])
 }
 
+/// Returns a color hinting at where the file lives on disk.
+fn file_type_color(path: &Path) -> Color {
+    let s = path.to_string_lossy();
+    if s.ends_with(".app") {
+        Color::Red
+    } else if s.contains("/Caches") {
+        Color::Yellow
+    } else if s.contains("/Preferences") {
+        Color::Blue
+    } else if s.contains("/Logs") {
+        Color::Cyan
+    } else if s.contains("/Containers") {
+        Color::Magenta
+    } else {
+        Color::White
+    }
+}
+
+/// Render a proportional block bar of `width` chars (e.g. `████░░`).
+fn size_bar(size: u64, max: u64, width: usize) -> String {
+    if width == 0 || max == 0 {
+        return "░".repeat(width);
+    }
+    let ratio = size as f64 / max as f64;
+    let filled = ((ratio * width as f64).round() as usize).min(width);
+    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -421,11 +544,9 @@ mod tests {
 
     #[test]
     fn truncate_left_preserves_tail() {
-        // The tail of the string should always be visible
         let s = "/very/long/path/to/important/file.plist";
         let max = 15usize;
         let result = truncate_left(s, max);
-        // Result should start with ellipsis and preserve the last (max-1) chars
         let expected_tail = &s[s.len() - (max - 1)..];
         assert!(result.starts_with('…'), "should start with ellipsis");
         assert!(result.ends_with(expected_tail), "should preserve the tail of the path");
@@ -450,20 +571,54 @@ mod tests {
         }
     }
 
+    // ── size_bar ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn size_bar_full_when_max() {
+        let bar = size_bar(100, 100, 6);
+        assert_eq!(bar, "██████");
+    }
+
+    #[test]
+    fn size_bar_empty_when_zero() {
+        let bar = size_bar(0, 100, 6);
+        assert_eq!(bar, "░░░░░░");
+    }
+
+    #[test]
+    fn size_bar_correct_width() {
+        let bar = size_bar(50, 100, 8);
+        assert_eq!(bar.chars().count(), 8);
+    }
+
+    // ── file_type_color ───────────────────────────────────────────────────────
+
+    #[test]
+    fn file_type_color_bundle_is_red() {
+        assert_eq!(file_type_color(Path::new("/Applications/Slack.app")), Color::Red);
+    }
+
+    #[test]
+    fn file_type_color_caches_is_yellow() {
+        assert_eq!(
+            file_type_color(Path::new("/Users/user/Library/Caches/Slack")),
+            Color::Yellow,
+        );
+    }
+
     // ── rendering smoke tests (TestBackend) ───────────────────────────────────
 
     fn make_found_file(path: &str, size: u64, is_bundle: bool) -> FoundFile {
         FoundFile { path: PathBuf::from(path), size, is_bundle }
     }
 
-    /// Render the file selector once and assert it doesn't panic and contains
-    /// expected text in the output buffer.
     #[test]
     fn file_selector_renders_app_name_and_files() {
         let files = vec![
             make_found_file("/Applications/Slack.app", 300_000_000, true),
             make_found_file("/Users/user/Library/Application Support/Slack", 800_000_000, false),
         ];
+        let max_size = files.iter().map(|f| f.size).max().unwrap_or(1).max(1);
 
         let backend = TestBackend::new(120, 20);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -479,42 +634,81 @@ mod tests {
                     .constraints([Constraint::Min(3), Constraint::Length(3)])
                     .split(area);
 
-                let path_width = (area.width as usize).saturating_sub(24);
+                // columns: check(3) + path + bar_with_gaps(8) + size(9) + tag(6) + borders(2) = 28
+                let path_width = (area.width as usize).saturating_sub(28);
+
                 let items: Vec<ListItem> = files
                     .iter()
                     .enumerate()
                     .map(|(i, file)| {
-                        let checkbox = if selected[i] { "[✓]" } else { "[ ]" };
+                        let is_sel = selected[i];
+                        let check_span = Span::styled(
+                            if is_sel { " ◉ " } else { " ○ " },
+                            if is_sel {
+                                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            },
+                        );
                         let path = shorten_path(&file.path);
-                        let path_display = truncate_left(&path, path_width);
-                        let size = format!("{:>9}", ByteSize(file.size).to_string());
-                        let tag = if file.is_bundle { " [app]" } else { "      " };
-                        let style = if i == cursor {
-                            Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
-                        } else if selected[i] {
-                            Style::default().fg(Color::Green)
+                        let path_display = format!("{:<path_width$}", truncate_left(&path, path_width));
+                        let path_span = Span::styled(
+                            path_display,
+                            Style::default().fg(file_type_color(&file.path)),
+                        );
+                        let bar = size_bar(file.size, max_size, 6);
+                        let bar_span = Span::styled(
+                            format!(" {bar} "),
+                            Style::default().fg(Color::Cyan),
+                        );
+                        let size_span = Span::styled(
+                            format!("{:>9}", ByteSize(file.size).to_string()),
+                            Style::default().fg(Color::Yellow),
+                        );
+                        let tag_span = if file.is_bundle {
+                            Span::styled(" [app]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Span::raw("      ")
                         };
-                        ListItem::new(Line::from(vec![Span::styled(
-                            format!(" {checkbox} {path_display:<path_width$}  {size}{tag}"),
-                            style,
-                        )]))
+                        ListItem::new(Line::from(vec![
+                            check_span, path_span, bar_span, size_span, tag_span,
+                        ]))
+                        .style(if i == cursor {
+                            Style::default().bg(Color::Rgb(45, 45, 65))
+                        } else {
+                            Style::default()
+                        })
                     })
                     .collect();
 
-                let title = " Slack — 2/2 selected  (1.1 GB) ";
+                let title = Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("Slack", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw(" — 2/2 selected  (1.1 GB) "),
+                ]);
                 let list = List::new(items)
-                    .block(Block::default().borders(Borders::ALL).title(title));
+                    .block(Block::default().borders(Borders::ALL).title(title))
+                    .highlight_style(Style::default().bg(Color::Rgb(45, 45, 65)));
                 let mut state = ListState::default().with_selected(Some(cursor));
                 f.render_stateful_widget(list, chunks[0], &mut state);
 
-                let help = Paragraph::new(
-                    " ↑/k ↓/j  Navigate    Space  Toggle    a  Toggle all    Enter  Confirm    q  Quit",
-                )
-                .block(Block::default().borders(Borders::ALL))
-                .style(Style::default().fg(Color::DarkGray));
-                f.render_widget(help, chunks[1]);
+                let help = Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("↑↓/jk", Style::default().fg(Color::Cyan)),
+                    Span::raw(" Navigate    "),
+                    Span::styled("Space", Style::default().fg(Color::Cyan)),
+                    Span::raw(" Toggle    "),
+                    Span::styled("a", Style::default().fg(Color::Cyan)),
+                    Span::raw(" Toggle all    "),
+                    Span::styled("Enter", Style::default().fg(Color::Green)),
+                    Span::raw(" Confirm    "),
+                    Span::styled("q", Style::default().fg(Color::Red)),
+                    Span::raw(" Quit"),
+                ]);
+                f.render_widget(
+                    Paragraph::new(help).block(Block::default().borders(Borders::ALL)),
+                    chunks[1],
+                );
             })
             .unwrap();
 
@@ -522,9 +716,10 @@ mod tests {
         let content: String = buffer.content().iter().map(|c| c.symbol()).collect();
 
         assert!(content.contains("Slack"), "title should contain app name");
-        assert!(content.contains("[✓]"), "checked items should appear");
+        assert!(content.contains("◉"), "selected items should show filled circle");
         assert!(content.contains("[app]"), "bundle marker should appear");
         assert!(content.contains("Navigate"), "help bar should appear");
+        assert!(content.contains("█"), "size bar should appear");
     }
 
     #[test]
@@ -538,8 +733,8 @@ mod tests {
                 let vchunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Percentage(35),
-                        Constraint::Length(9),
+                        Constraint::Percentage(30),
+                        Constraint::Length(11),
                         Constraint::Min(0),
                     ])
                     .split(area);
@@ -556,7 +751,15 @@ mod tests {
                 let dialog_area = hchunks[1];
                 let block = Block::default()
                     .borders(Borders::ALL)
-                    .title(" Confirm deletion ");
+                    .border_style(Style::default().fg(Color::Red))
+                    .title(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(
+                            "⚠  Confirm deletion",
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                    ]));
                 let inner = block.inner(dialog_area);
                 f.render_widget(block, dialog_area);
 
@@ -569,12 +772,18 @@ mod tests {
                         Constraint::Length(1),
                         Constraint::Length(1),
                         Constraint::Length(1),
+                        Constraint::Length(1),
                     ])
                     .split(inner);
 
                 f.render_widget(
-                    Paragraph::new("Will free 1.1 GB across 3 item(s)")
-                        .alignment(Alignment::Center),
+                    Paragraph::new(Line::from(vec![
+                        Span::styled("3 item(s)", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                        Span::raw(" will be moved to the appclean trash  ("),
+                        Span::styled("1.1 GB", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                        Span::raw(")"),
+                    ]))
+                    .alignment(Alignment::Center),
                     inner_chunks[1],
                 );
 
@@ -584,13 +793,12 @@ mod tests {
                     .add_modifier(Modifier::BOLD);
                 f.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::raw("  "),
                         Span::styled("  Yes, delete  ", Style::default().fg(Color::DarkGray)),
                         Span::raw("    "),
                         Span::styled("  No, cancel  ", no_style),
                     ]))
                     .alignment(Alignment::Center),
-                    inner_chunks[3],
+                    inner_chunks[4],
                 );
             })
             .unwrap();
@@ -628,26 +836,41 @@ mod tests {
                     .enumerate()
                     .map(|(i, item)| {
                         let style = if i == cursor {
-                            Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default()
+                            Style::default().fg(Color::White)
                         };
                         ListItem::new(Span::styled(format!(" {item} "), style))
                     })
                     .collect();
 
-                let list = List::new(list_items).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Select a session to restore "),
-                );
+                let title = Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        "Select a session to restore",
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                ]);
+                let list = List::new(list_items)
+                    .block(Block::default().borders(Borders::ALL).title(title))
+                    .highlight_style(Style::default().bg(Color::Rgb(45, 45, 65)));
                 let mut state = ListState::default().with_selected(Some(cursor));
                 f.render_stateful_widget(list, chunks[0], &mut state);
 
-                let help = Paragraph::new(" ↑/k ↓/j  Navigate    Enter  Select    q  Quit")
-                    .block(Block::default().borders(Borders::ALL))
-                    .style(Style::default().fg(Color::DarkGray));
-                f.render_widget(help, chunks[1]);
+                let help = Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("↑↓/jk", Style::default().fg(Color::Cyan)),
+                    Span::raw(" Navigate    "),
+                    Span::styled("Enter", Style::default().fg(Color::Green)),
+                    Span::raw(" Select    "),
+                    Span::styled("q", Style::default().fg(Color::Red)),
+                    Span::raw(" Quit"),
+                ]);
+                f.render_widget(
+                    Paragraph::new(help).block(Block::default().borders(Borders::ALL)),
+                    chunks[1],
+                );
             })
             .unwrap();
 
