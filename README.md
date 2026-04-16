@@ -6,8 +6,10 @@ A macOS command-line app cleaner. When you drag an app to the Trash, macOS leave
 
 - Scans all standard macOS library locations for associated files
 - Interactive multi-select — choose exactly what to remove
-- `--dry-run` to preview what would be deleted without touching anything
-- Progress bar during deletion
+- **Moves files to a recoverable trash by default** — restore at any time with `appclean restore`
+- `--permanent` to skip the trash and delete immediately
+- `--dry-run` to preview what would be removed without touching anything
+- Progress bar during move/delete
 - Matches by both bundle ID (`com.tinyspeck.slackmacgap`) and app name (`Slack`)
 
 ## Installation
@@ -24,15 +26,58 @@ cargo install --path .
 
 ## Usage
 
+### Remove an app (recoverable — default)
+
+Files are moved to `~/.appclean/trash/` rather than permanently deleted.
+
 ```sh
-# Interactive — select which files to delete, then confirm
 appclean /Applications/Slack.app
+```
 
-# Preview what would be deleted without deleting anything
+### Restore a previous removal
+
+Lists all past sessions and lets you pick one to restore.
+
+```sh
+appclean restore
+```
+
+### Remove an app permanently
+
+Skips the trash and deletes immediately. **This cannot be undone.**
+
+```sh
+appclean --permanent /Applications/Slack.app
+```
+
+### Preview what would be removed
+
+Shows everything that would be removed without touching anything.
+
+```sh
 appclean --dry-run /Applications/Slack.app
+```
 
-# Skip the confirmation prompt
+### Skip the confirmation prompt
+
+```sh
 appclean --yes /Applications/Slack.app
+```
+
+## Trash location
+
+By default, removed files are moved to:
+
+```
+~/.appclean/trash/<timestamp>-<AppName>/
+```
+
+Each session includes a `manifest.json` that records the original file paths, which is what `appclean restore` uses to put everything back.
+
+To permanently clear the trash (free up disk space):
+
+```sh
+rm -rf ~/.appclean/trash
 ```
 
 ## Locations scanned

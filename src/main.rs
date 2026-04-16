@@ -102,14 +102,14 @@ fn cmd_clean(app_path: PathBuf, dry_run: bool, yes: bool, permanent: bool) -> Re
     if permanent {
         cleaner::delete_files(&selected)?;
     } else {
-        trash::move_to_trash(&selected, &bundle.name)?;
+        trash::TrashStore::new()?.move_to_trash(&selected, &bundle.name)?;
     }
 
     Ok(())
 }
 
 fn cmd_restore() -> Result<()> {
-    let entries = trash::list_entries()?;
+    let entries = trash::TrashStore::new()?.list_entries()?;
 
     if entries.is_empty() {
         println!("No items in the appclean trash.");
