@@ -7,7 +7,7 @@ The binary is named **`apc`** for quick access (same idea as `rg` for ripgrep).
 ## Features
 
 - Full terminal UI — navigate with keyboard, toggle files, confirm before deleting
-- **Recoverable trash by default** — `ac restore` brings everything back
+- **Recoverable trash by default** — `apc restore` brings everything back
 - `--permanent` to skip the trash and delete immediately
 - `--dry-run` to preview what would be removed without touching anything
 - Inline size bars and color-coded file types for fast visual scanning
@@ -101,7 +101,7 @@ Removed files are moved to:
 ~/.appclean/trash/<timestamp>-<AppName>/
 ```
 
-Each session writes a `manifest.json` with original paths, which is what `ac restore` uses to put everything back.
+Each session writes a `manifest.json` with original paths, which is what `apc restore` uses to put everything back.
 
 ## Locations scanned
 
