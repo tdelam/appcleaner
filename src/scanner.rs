@@ -26,12 +26,6 @@ pub struct Scanner {
     home_dir: PathBuf,
 }
 
-impl Default for Scanner {
-    fn default() -> Self {
-        Self::new().expect("could not determine home directory")
-    }
-}
-
 impl Scanner {
     /// Create a scanner rooted at the current user's home directory.
     ///
@@ -147,6 +141,13 @@ fn is_match(name: &str, terms: &MatchTerms) -> bool {
     name_lower.starts_with(&terms.app_name_dot)
 }
 
+/// Compute total byte size of `path`.
+///
+/// Symlinks count as zero and are not traversed: `WalkDir` does not follow
+/// links by default, and with `follow_links(false)` its `DirEntry::metadata`
+/// uses `symlink_metadata`, so symlinked files are skipped by the `is_file`
+/// filter. This avoids double-counting shared storage and prevents traversal
+/// cycles on malformed trees.
 fn compute_size(path: &Path) -> u64 {
     if path.is_symlink() {
         return 0;
@@ -201,6 +202,19 @@ mod tests {
     fn does_not_match_unrelated() {
         let bundle = make_bundle("Slack", "com.tinyspeck.slackmacgap");
         assert!(!is_match("com.apple.Safari", &terms(&bundle)));
+    }
+
+    #[test]
+    fn requires_boundary_after_bundle_id_prefix() {
+        // Matching must require a dot or space boundary after the bundle ID —
+        // a bare character-level prefix is not enough. If this regresses, short
+        // bundle IDs would start grabbing unrelated apps' files.
+        let bundle = make_bundle("Ex", "com.ex");
+        assert!(!is_match("com.example", &terms(&bundle)));
+        assert!(!is_match("com.example.plist", &terms(&bundle)));
+        // Sanity: the intended matches still work with a dot boundary.
+        assert!(is_match("com.ex", &terms(&bundle)));
+        assert!(is_match("com.ex.plist", &terms(&bundle)));
     }
 
     // Known limitation: an app with a very short bundle ID (e.g. "com.example") will

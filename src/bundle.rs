@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct AppBundle {
@@ -11,14 +10,6 @@ pub struct AppBundle {
     pub name: String,
     /// Reverse-DNS identifier, e.g. "com.tinyspeck.slackmacgap"
     pub bundle_id: String,
-}
-
-#[derive(Debug, Error)]
-pub enum BundleError {
-    #[error("not a .app bundle: {0}")]
-    NotABundle(PathBuf),
-    #[error("missing Contents/Info.plist in {0}")]
-    MissingPlist(PathBuf),
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,12 +33,12 @@ impl AppBundle {
             .unwrap_or_else(|_| path.as_ref().to_path_buf());
 
         if path.extension().and_then(|e| e.to_str()) != Some("app") {
-            return Err(BundleError::NotABundle(path).into());
+            return Err(anyhow!("not a .app bundle: {}", path.display()));
         }
 
         let plist_path = path.join("Contents/Info.plist");
         if !plist_path.exists() {
-            return Err(BundleError::MissingPlist(path).into());
+            return Err(anyhow!("missing Contents/Info.plist in {}", path.display()));
         }
 
         let info: InfoPlist = plist::from_file(&plist_path)

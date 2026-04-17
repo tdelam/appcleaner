@@ -25,28 +25,40 @@ type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 // ── TUI lifecycle ─────────────────────────────────────────────────────────────
 
-fn init_tui() -> Result<Tui> {
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-    Ok(Terminal::new(CrosstermBackend::new(stdout()))?)
+/// RAII guard that owns the terminal and restores cooked mode / the main
+/// screen on drop. This runs on both normal return AND stack unwinding, so
+/// a panic inside the TUI closure can't leave the user stuck in raw mode.
+struct TuiGuard {
+    terminal: Tui,
 }
 
-fn restore_tui(terminal: &mut Tui) -> Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    Ok(())
+impl TuiGuard {
+    fn new() -> Result<Self> {
+        enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+        Ok(Self { terminal })
+    }
 }
 
-/// Run a closure with a TUI terminal, restoring the terminal on exit or error.
+impl Drop for TuiGuard {
+    fn drop(&mut self) {
+        // Best-effort — nothing useful to do if restoration fails, and we
+        // must not panic during drop.
+        let _ = disable_raw_mode();
+        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+/// Run a closure with a TUI terminal. The terminal is restored on normal
+/// return, error return, and panic unwinding via `TuiGuard`'s Drop impl.
 fn with_tui<F, T>(f: F) -> Result<T>
 where
     F: FnOnce(&mut Tui) -> Result<T>,
 {
-    let mut terminal = init_tui()?;
-    let result = f(&mut terminal);
-    let _ = restore_tui(&mut terminal);
-    result
+    let mut guard = TuiGuard::new()?;
+    f(&mut guard.terminal)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -54,9 +66,12 @@ where
 /// Show an interactive file list. Returns the files the user chose to remove.
 /// Returns an empty vec if the user quits without confirming.
 ///
+/// Takes `files` by value so that selected items move into the returned vec
+/// without per-item clones — important for large scans.
+///
 /// # Errors
 /// Returns an error if terminal initialisation or event polling fails.
-pub fn select_files(app_name: &str, files: &[FoundFile]) -> Result<Vec<FoundFile>> {
+pub fn select_files(app_name: &str, files: Vec<FoundFile>) -> Result<Vec<FoundFile>> {
     with_tui(|t| run_file_selector(t, app_name, files))
 }
 
@@ -91,10 +106,10 @@ pub fn show_dry_run(files: &[FoundFile]) {
 // ── File selector ─────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_lines)]
-fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) -> Result<Vec<FoundFile>> {
+fn run_file_selector(terminal: &mut Tui, app_name: &str, files: Vec<FoundFile>) -> Result<Vec<FoundFile>> {
     let mut selected = vec![true; files.len()];
     let mut cursor = 0usize;
-    let max_size = files.iter().map(|f| f.size).max().unwrap_or(1).max(1);
+    let max_size = files.iter().map(|f| f.size).max().unwrap_or(1);
 
     loop {
         terminal.draw(|f| {
@@ -241,10 +256,9 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: &[FoundFile]) ->
     }
 
     Ok(files
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| selected[*i])
-        .map(|(_, f)| f.clone())
+        .into_iter()
+        .zip(selected)
+        .filter_map(|(f, is_selected)| is_selected.then_some(f))
         .collect())
 }
 
@@ -482,15 +496,21 @@ fn shorten_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Truncate a string from the left, adding a `…` prefix if it was clipped.
+/// Truncate a string from the left to at most `max` characters, adding a `…`
+/// prefix if it was clipped. Operates on chars — not bytes — so it cannot
+/// panic on non-ASCII paths.
 fn truncate_left(s: &str, max: usize) -> String {
     if max == 0 {
         return String::new();
     }
-    if s.len() <= max {
+    let char_count = s.chars().count();
+    if char_count <= max {
         return s.to_string();
     }
-    format!("…{}", &s[s.len() - max.saturating_sub(1)..])
+    // Keep the last (max - 1) chars and prefix with `…` for a total of `max`.
+    let skip = char_count - max.saturating_sub(1);
+    let tail: String = s.chars().skip(skip).collect();
+    format!("…{tail}")
 }
 
 /// Returns a color hinting at where the file lives on disk.
@@ -569,6 +589,24 @@ mod tests {
         assert!(result.ends_with(expected_tail), "should preserve the tail of the path");
     }
 
+    #[test]
+    fn truncate_left_does_not_panic_on_multibyte_chars() {
+        // Byte-slicing would panic if the cut landed mid-codepoint. Char-based
+        // truncation keeps the last `max - 1` chars regardless of byte width.
+        let s = "~/Library/Application Support/微信/Data";
+        let result = truncate_left(s, 12);
+        assert_eq!(result.chars().count(), 12);
+        assert!(result.starts_with('…'));
+        assert!(result.ends_with("Data"));
+    }
+
+    #[test]
+    fn truncate_left_fits_exactly_on_unicode_boundary() {
+        let s = "αβγδε"; // 5 chars, 10 bytes
+        assert_eq!(truncate_left(s, 5), s);
+        assert_eq!(truncate_left(s, 3), "…δε");
+    }
+
     // ── shorten_path ──────────────────────────────────────────────────────────
 
     #[test]
@@ -631,11 +669,11 @@ mod tests {
 
     #[test]
     fn file_selector_renders_app_name_and_files() {
-        let files = vec![
+        let files = [
             make_found_file("/Applications/Slack.app", 300_000_000, true),
             make_found_file("/Users/user/Library/Application Support/Slack", 800_000_000, false),
         ];
-        let max_size = files.iter().map(|f| f.size).max().unwrap_or(1).max(1);
+        let max_size = files.iter().map(|f| f.size).max().unwrap_or(1);
 
         let backend = TestBackend::new(120, 20);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -834,7 +872,7 @@ mod tests {
     fn list_selector_renders_items_and_prompt() {
         let backend = TestBackend::new(120, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        let items = vec![
+        let items = [
             "Slack  —  6 item(s) trashed on 2026-04-15 21:00 UTC".to_string(),
             "Zoom  —  3 item(s) trashed on 2026-04-10 14:23 UTC".to_string(),
         ];
