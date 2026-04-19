@@ -235,10 +235,8 @@ fn run_file_selector(terminal: &mut Tui, app_name: &str, files: Vec<FoundFile>) 
                     KeyCode::Up | KeyCode::Char('k') => {
                         cursor = cursor.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if cursor + 1 < files.len() {
-                            cursor += 1;
-                        }
+                    KeyCode::Down | KeyCode::Char('j') if cursor + 1 < files.len() => {
+                        cursor += 1;
                     }
                     KeyCode::Char(' ') => {
                         selected[cursor] = !selected[cursor];
@@ -471,10 +469,8 @@ fn run_list_selector(terminal: &mut Tui, prompt: &str, items: &[String]) -> Resu
                     KeyCode::Up | KeyCode::Char('k') => {
                         cursor = cursor.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if cursor + 1 < items.len() {
-                            cursor += 1;
-                        }
+                    KeyCode::Down | KeyCode::Char('j') if cursor + 1 < items.len() => {
+                        cursor += 1;
                     }
                     KeyCode::Enter => return Ok(Some(cursor)),
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(None),

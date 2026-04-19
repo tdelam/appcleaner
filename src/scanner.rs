@@ -59,7 +59,7 @@ impl Scanner {
         }
 
         // Sort by size descending so the largest items appear first (skip index 0 — the bundle)
-        found[1..].sort_by(|a, b| b.size.cmp(&a.size));
+        found[1..].sort_by_key(|f| std::cmp::Reverse(f.size));
         Ok(found)
     }
 

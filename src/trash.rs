@@ -191,7 +191,7 @@ impl TrashStore {
             entries.push((dir_entry.path(), entry));
         }
 
-        entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.timestamp));
         Ok(entries)
     }
 
