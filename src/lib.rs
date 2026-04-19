@@ -15,3 +15,19 @@ pub mod ui;
 pub use bundle::AppBundle;
 pub use scanner::{FoundFile, Scanner};
 pub use trash::TrashStore;
+
+use indicatif::{ProgressBar, ProgressStyle};
+
+const PROGRESS_TEMPLATE: &str = "{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}";
+
+/// Build a consistently-styled progress bar for file operations.
+pub(crate) fn styled_progress_bar(len: u64) -> ProgressBar {
+    let pb = ProgressBar::new(len);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(PROGRESS_TEMPLATE)
+            .expect("hardcoded progress template is valid")
+            .progress_chars("=>-"),
+    );
+    pb
+}

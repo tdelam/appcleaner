@@ -1,13 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::macros::format_description;
 
 use crate::scanner::FoundFile;
+use crate::styled_progress_bar;
 
 const TRASH_DIR_NAME: &str = ".appclean/trash";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -61,12 +61,6 @@ pub struct TrashStore {
     root: PathBuf,
 }
 
-impl Default for TrashStore {
-    fn default() -> Self {
-        Self::new().expect("could not determine home directory")
-    }
-}
-
 impl TrashStore {
     /// Create a store rooted at `~/.appclean/trash/`.
     ///
@@ -85,16 +79,9 @@ impl TrashStore {
     /// the manifest cannot be written. Individual file move errors are printed
     /// as warnings but do not abort the operation.
     pub fn move_to_trash(&self, files: &[FoundFile], app_name: &str) -> Result<TrashEntry> {
-        let session_dir = self.session_dir(app_name);
-        std::fs::create_dir_all(&session_dir)
-            .with_context(|| format!("failed to create trash dir {}", session_dir.display()))?;
+        let session_dir = self.create_session_dir(app_name)?;
 
-        let pb = ProgressBar::new(files.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")?
-                .progress_chars("=>-"),
-        );
+        let pb = styled_progress_bar(files.len() as u64);
 
         let mut items = Vec::new();
         let mut errors: Vec<anyhow::Error> = Vec::new();
@@ -108,8 +95,14 @@ impl TrashStore {
                     .to_string(),
             );
 
-            // Strip the leading `/` so the path can be joined under session_dir.
-            let relative = file.path.strip_prefix("/").unwrap_or(&file.path).to_path_buf();
+            // Rebuild the path without the root component so it can be joined
+            // under session_dir. `Path::join` treats absolute paths as replacements,
+            // so we must strip the leading root (e.g. `/` on unix) explicitly.
+            let relative: PathBuf = file
+                .path
+                .components()
+                .filter(|c| !matches!(c, Component::RootDir | Component::Prefix(_)))
+                .collect();
             let dest = session_dir.join(&relative);
 
             match move_path(&file.path, &dest) {
@@ -133,12 +126,37 @@ impl TrashStore {
         let entry = TrashEntry { app_name: app_name.to_string(), timestamp, items };
 
         let manifest_path = session_dir.join(MANIFEST_FILE);
-        let json = serde_json::to_string_pretty(&entry)
-            .context("failed to serialise trash manifest")?;
-        std::fs::write(&manifest_path, json)
-            .with_context(|| format!("failed to write manifest to {}", manifest_path.display()))?;
+        if let Err(e) = write_manifest(&entry, &manifest_path) {
+            // Files have already been moved into the session dir. Without a
+            // manifest, `apc restore` can't see them. Print a recovery trail
+            // so the user can manually put them back.
+            if !entry.items.is_empty() {
+                eprintln!(
+                    "error: manifest write failed — {} file(s) are in the trash but untracked.",
+                    entry.items.len()
+                );
+                eprintln!("  Recover by moving these back manually:");
+                for item in &entry.items {
+                    eprintln!(
+                        "    {} → {}",
+                        item.trash_path.display(),
+                        item.original_path.display(),
+                    );
+                }
+            }
+            return Err(e);
+        }
 
-        println!("Moved {} item(s) to trash.", entry.items.len());
+        if errors.is_empty() {
+            println!("Moved {} item(s) to trash.", entry.items.len());
+        } else {
+            println!(
+                "Moved {}/{} item(s) to trash; {} could not be moved (see warnings above).",
+                entry.items.len(),
+                files.len(),
+                errors.len(),
+            );
+        }
         println!("  Restore with: apc restore");
 
         Ok(entry)
@@ -173,7 +191,7 @@ impl TrashStore {
             entries.push((dir_entry.path(), entry));
         }
 
-        entries.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.timestamp));
         Ok(entries)
     }
 
@@ -208,26 +226,58 @@ impl TrashStore {
         Ok(to_delete.len())
     }
 
-    fn session_dir(&self, app_name: &str) -> PathBuf {
+    /// Create a fresh, unique session directory under `self.root`.
+    ///
+    /// Two `apc` processes trashing the same app within a one-second window
+    /// would otherwise generate identical `{timestamp}-{name}` paths and
+    /// silently merge into the same session (since `create_dir_all` is
+    /// idempotent). We use non-recursive `create_dir` and retry with an
+    /// incrementing suffix so concurrent invocations each get their own dir.
+    fn create_session_dir(&self, app_name: &str) -> Result<PathBuf> {
+        std::fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create trash root {}", self.root.display()))?;
+
         let safe_name = app_name.replace(['/', ' ', '.'], "_");
-        self.root.join(format!("{}-{safe_name}", now_secs()))
+        let base = format!("{}-{safe_name}", now_secs());
+
+        for suffix in 0u32..1000 {
+            let name = if suffix == 0 {
+                base.clone()
+            } else {
+                format!("{base}-{suffix}")
+            };
+            let candidate = self.root.join(&name);
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return Ok(candidate),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    return Err(e).with_context(|| {
+                        format!("failed to create trash dir {}", candidate.display())
+                    });
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "could not find a unique trash session name under {} after 1000 attempts",
+            self.root.display()
+        )
     }
 }
 
 /// Move all items in `entry` back to their original locations.
 ///
+/// On partial failure, the session manifest is rewritten to contain only the
+/// items that still need restoring, so a subsequent `apc restore` retries just
+/// those. Successfully restored items are not rolled back.
+///
 /// # Errors
-/// Returns an error if any item cannot be moved back. Successfully restored
-/// items are not rolled back on partial failure.
+/// Returns an error if any item cannot be moved back.
 pub fn restore(session_path: &Path, entry: &TrashEntry) -> Result<()> {
-    let pb = ProgressBar::new(entry.items.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")?
-            .progress_chars("=>-"),
-    );
+    let pb = styled_progress_bar(entry.items.len() as u64);
 
     let mut errors: Vec<anyhow::Error> = Vec::new();
+    let mut still_pending: Vec<TrashItem> = Vec::new();
 
     for item in &entry.items {
         pb.set_message(
@@ -240,6 +290,10 @@ pub fn restore(session_path: &Path, entry: &TrashEntry) -> Result<()> {
 
         if let Err(e) = move_path(&item.trash_path, &item.original_path) {
             errors.push(e);
+            still_pending.push(TrashItem {
+                original_path: item.original_path.clone(),
+                trash_path: item.trash_path.clone(),
+            });
         }
 
         pb.inc(1);
@@ -257,8 +311,21 @@ pub fn restore(session_path: &Path, entry: &TrashEntry) -> Result<()> {
         for e in &errors {
             eprintln!("  error: {e}");
         }
+
+        // Rewrite the manifest to list only the items still in the trash so
+        // that a retry doesn't try to re-move files that were already restored.
+        let remaining = TrashEntry {
+            app_name: entry.app_name.clone(),
+            timestamp: entry.timestamp,
+            items: still_pending,
+        };
+        let manifest_path = session_path.join(MANIFEST_FILE);
+        if let Err(e) = write_manifest(&remaining, &manifest_path) {
+            eprintln!("warning: {e}");
+        }
+
         anyhow::bail!(
-            "{} of {} item(s) could not be restored",
+            "{} of {} item(s) could not be restored (retry with: apc restore)",
             errors.len(),
             entry.items.len()
         )
@@ -270,7 +337,7 @@ pub fn restore(session_path: &Path, entry: &TrashEntry) -> Result<()> {
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("system clock is before UNIX_EPOCH")
         .as_secs()
 }
 
@@ -281,6 +348,13 @@ fn move_path(src: &Path, dest: &Path) -> Result<()> {
     }
     std::fs::rename(src, dest)
         .with_context(|| format!("failed to move {} to {}", src.display(), dest.display()))
+}
+
+fn write_manifest(entry: &TrashEntry, path: &Path) -> Result<()> {
+    let json = serde_json::to_string_pretty(entry)
+        .context("failed to serialise trash manifest")?;
+    std::fs::write(path, json)
+        .with_context(|| format!("failed to write manifest to {}", path.display()))
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -461,5 +535,80 @@ mod tests {
         let label = entry.label();
         assert!(label.contains("Slack"));
         assert!(label.contains("1 item(s)"));
+    }
+
+    #[test]
+    fn restore_partial_failure_rewrites_manifest_to_pending_only() {
+        // Two files are trashed. Before restoring, we pre-create one of the
+        // original paths as a directory so that `rename` fails for that item
+        // — simulating a partial restore. The manifest should then list only
+        // the still-pending item, letting a retry handle it cleanly.
+        let src_dir = tempdir().unwrap();
+        let trash_dir = tempdir().unwrap();
+        let store = make_store(trash_dir.path().to_path_buf());
+
+        let good = src_dir.path().join("good.plist");
+        let bad = src_dir.path().join("bad.plist");
+        std::fs::write(&good, "g").unwrap();
+        std::fs::write(&bad, "b").unwrap();
+
+        store
+            .move_to_trash(
+                &[make_found_file(good.clone()), make_found_file(bad.clone())],
+                "TestApp",
+            )
+            .unwrap();
+
+        // Block `bad`'s restore: create a non-empty directory at its original
+        // path so `fs::rename(trash_path, original_path)` fails with ENOTEMPTY.
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("blocker"), "x").unwrap();
+
+        let (session_path, entry) = store.list_entries().unwrap().into_iter().next().unwrap();
+        let err = restore(&session_path, &entry).unwrap_err();
+        assert!(err.to_string().contains("1 of 2"));
+
+        // `good` should be restored; `bad` remains in trash
+        assert!(good.exists() && good.is_file());
+        assert!(session_path.exists(), "session dir kept on partial failure");
+
+        // Manifest should now list only the 1 still-pending item
+        let rewritten = store.list_entries().unwrap();
+        assert_eq!(rewritten.len(), 1);
+        assert_eq!(rewritten[0].1.items.len(), 1);
+        assert_eq!(rewritten[0].1.items[0].original_path, bad);
+    }
+
+    #[test]
+    fn create_session_dir_avoids_collision_within_same_second() {
+        // Back-to-back calls for the same app within the same second must
+        // produce distinct directories — the naive `{timestamp}-{name}` scheme
+        // would collide and silently merge via `create_dir_all`.
+        let trash_dir = tempdir().unwrap();
+        let store = make_store(trash_dir.path().to_path_buf());
+
+        let a = store.create_session_dir("TestApp").unwrap();
+        let b = store.create_session_dir("TestApp").unwrap();
+        let c = store.create_session_dir("TestApp").unwrap();
+
+        assert_ne!(a, b);
+        assert_ne!(b, c);
+        assert_ne!(a, c);
+        assert!(a.is_dir() && b.is_dir() && c.is_dir());
+    }
+
+    #[test]
+    fn write_manifest_returns_contextualised_error_when_parent_missing() {
+        // Writing to a path whose parent directory doesn't exist must surface
+        // a real error (not panic) so callers can react — in move_to_trash
+        // this triggers the recovery-trail stderr dump.
+        let entry = TrashEntry {
+            app_name: "X".into(),
+            timestamp: 0,
+            items: vec![],
+        };
+        let bad_path = PathBuf::from("/nonexistent-dir-appclean-test/manifest.json");
+        let err = write_manifest(&entry, &bad_path).unwrap_err();
+        assert!(err.to_string().contains("failed to write manifest"));
     }
 }

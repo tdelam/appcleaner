@@ -51,13 +51,17 @@ const AUTO_PURGE_DAYS: u64 = 30;
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Silently purge sessions older than 30 days on every run to prevent
-    // the trash from growing indefinitely without user intervention.
+    // Purge sessions older than 30 days on every run so the trash doesn't
+    // grow indefinitely. Surface purge errors so an ever-growing trash isn't
+    // invisible; swallow store-construction errors because any command that
+    // actually needs a TrashStore will report them with real context.
     if let Ok(store) = TrashStore::new() {
-        if let Ok(n) = store.empty_trash(Some(AUTO_PURGE_DAYS)) {
-            if n > 0 {
+        match store.empty_trash(Some(AUTO_PURGE_DAYS)) {
+            Ok(n) if n > 0 => {
                 println!("Auto-removed {n} trash session(s) older than {AUTO_PURGE_DAYS} days.\n");
             }
+            Ok(_) => {}
+            Err(e) => eprintln!("warning: auto-purge failed: {e:#}"),
         }
     }
 
@@ -99,7 +103,7 @@ fn cmd_clean(app_path: &Path, dry_run: bool, yes: bool, permanent: bool) -> Resu
     }
 
     // 3. Let the user choose which files to remove
-    let selected = ui::select_files(&bundle.name, &found)?;
+    let selected = ui::select_files(&bundle.name, found)?;
 
     if selected.is_empty() {
         println!("Nothing selected, exiting.");
